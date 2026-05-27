@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediaVault — Sign In</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=SF+Pro+Display:wght@300;400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-body">
+
+    <!-- Ambient background orbs -->
+    <div class="bg-orbs">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+
+    <div class="login-container">
+        <div class="glass-card login-card">
+            <div class="login-brand">
+                <div class="brand-icon">
+                    <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="20" cy="20" r="18" stroke="rgba(255,255,255,0.6)" stroke-width="1.5"/>
+                        <path d="M12 26 L20 14 L28 26" stroke="rgba(255,255,255,0.9)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                        <circle cx="20" cy="20" r="3" fill="rgba(255,255,255,0.8)"/>
+                    </svg>
+                </div>
+                <h1 class="brand-name">MediaVault</h1>
+                <p class="brand-sub">Your private gallery</p>
+            </div>
+
+            {% if request.query_params.get('error') %}
+            <div class="error-pill">
+                <span>⚠</span> Invalid credentials — try again
+            </div>
+            {% endif %}
+
+            <form action="/login" method="post" class="login-form">
+                <div class="glass-input-group">
+                    <label>Username</label>
+                    <input type="text" name="username" class="glass-input" placeholder="Enter username" autocomplete="username" required>
+                </div>
+                <div class="glass-input-group">
+                    <label>Password</label>
+                    <input type="password" name="password" class="glass-input" placeholder="Enter password" autocomplete="current-password" required>
+                </div>
+                <button type="submit" class="glass-btn-primary">
+                    <span>Unlock Gallery</span>
+                    <svg viewBox="0 0 20 20" fill="none"><path d="M4 10h12M11 5l5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+            </form>
+        </div>
+    </div>
+
+</body>
+</html>

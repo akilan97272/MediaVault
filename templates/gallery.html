@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>MediaVault — Gallery</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=SF+Pro+Display:wght@300;400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="gallery-body">
+
+    <!-- Ambient background -->
+    <div class="bg-orbs">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+    </div>
+
+    <!-- ===== SIDEBAR ===== -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-brand">
+                <svg viewBox="0 0 24 24" fill="none" class="brand-svg"><circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.7)" stroke-width="1.2"/><path d="M7 16l5-8 5 8" stroke="rgba(255,255,255,0.9)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="12" cy="12" r="1.5" fill="rgba(255,255,255,0.8)"/></svg>
+                <span>MediaVault</span>
+            </div>
+            <button class="sidebar-close" id="sidebarClose">✕</button>
+        </div>
+
+        <nav class="sidebar-nav">
+            <div class="tree-section-label">Library</div>
+
+            <!-- Root -->
+            <div class="tree-item tree-root active" data-path="" onclick="navigateTo('')">
+                <span class="tree-icon">🏠</span>
+                <span class="tree-label">All Media</span>
+            </div>
+
+            <!-- Dynamic folder tree -->
+            <div id="folderTree" class="folder-tree"></div>
+        </nav>
+
+        <!-- Admin section -->
+        {% if is_admin %}
+        <div class="sidebar-admin">
+            <div class="tree-section-label">Admin</div>
+            <button class="sidebar-nav-btn" onclick="openUserManager()">
+                <span>👥</span> Manage Users
+            </button>
+        </div>
+        {% endif %}
+
+        <div class="sidebar-footer">
+            <span class="sidebar-user">Signed in as <strong>{{ user }}</strong></span>
+            <a href="/logout" class="sidebar-logout">Sign out</a>
+        </div>
+    </aside>
+
+    <!-- Sidebar overlay -->
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+    <!-- ===== MAIN CONTENT ===== -->
+    <div class="main-wrapper">
+
+        <!-- Top bar -->
+        <header class="topbar glass-header">
+            <button class="topbar-menu" id="menuBtn" onclick="openSidebar()">
+                <span></span><span></span><span></span>
+            </button>
+            <div class="topbar-path">
+                <span id="pathBreadcrumb">All Media</span>
+            </div>
+            <div class="topbar-actions">
+                <button class="topbar-icon-btn" onclick="openUserManager()" id="adminBtn" title="Manage Users" style="display:none">
+                    <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M4 17c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- Path nav bar (breadcrumb) -->
+        <div class="path-nav" id="pathNav" style="display:none">
+            <button class="path-back-btn" onclick="goUp()">
+                <svg viewBox="0 0 20 20" fill="none"><path d="M13 5l-5 5 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Back
+            </button>
+            <span class="path-label" id="pathLabel">/</span>
+        </div>
+
+        <!-- Gallery Grid -->
+        <main class="gallery-grid" id="galleryGrid">
+            <div class="loading-state" id="loadingState">
+                <div class="loading-spinner"></div>
+                <span>Loading…</span>
+            </div>
+        </main>
+
+        <!-- Empty state -->
+        <div class="empty-state" id="emptyState" style="display:none">
+            <div class="empty-icon">🖼</div>
+            <p>No media here yet</p>
+            <span>Upload files using the + button</span>
+        </div>
+
+    </div>
+
+    <!-- ===== FABs ===== -->
+    <div class="fab-group">
+        <button class="fab-secondary" onclick="createFolder()" title="New Folder">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="1.5"/><path d="M12 12v4M10 14h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+        <button class="fab-primary" onclick="document.getElementById('fileInput').click()" title="Upload">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v10M7 9l5-5 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 19h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+    </div>
+    <input type="file" id="fileInput" hidden accept="image/*,video/*" multiple>
+
+    <!-- ===== LIGHTBOX ===== -->
+    <div id="lightbox" class="lightbox">
+        <div class="lightbox-topbar">
+            <button class="lb-btn-close" id="closeLightbox">✕</button>
+        </div>
+        <button class="lb-nav lb-prev" id="prevBtn">&#10094;</button>
+        <button class="lb-nav lb-next" id="nextBtn">&#10095;</button>
+        <div id="lightboxContainer" class="lightbox-wrapper"></div>
+    </div>
+
+    <!-- ===== USER MANAGER MODAL ===== -->
+    <div class="modal-overlay" id="userModal">
+        <div class="glass-modal">
+            <div class="modal-header">
+                <h2>Manage Users</h2>
+                <button onclick="closeUserManager()" class="modal-close">✕</button>
+            </div>
+
+            <div class="modal-body">
+                <!-- Add user form -->
+                <div class="add-user-form">
+                    <h3>Add New User</h3>
+                    <div class="modal-row">
+                        <input type="text" id="newUsername" class="glass-input sm" placeholder="Username (3-30 chars)">
+                        <input type="password" id="newPassword" class="glass-input sm" placeholder="Password">
+                        <button class="glass-btn-accent" onclick="createUser()">Add</button>
+                    </div>
+                    <div id="userFormMsg" class="form-msg"></div>
+                </div>
+
+                <!-- User list -->
+                <div class="user-list-section">
+                    <h3>Existing Users</h3>
+                    <div id="userList" class="user-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        window.IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+    </script>
+    <script src="/static/script.js"></script>
+</body>
+</html>
