@@ -1,3 +1,0 @@
-USERS = {
-    "admin": "admin123"
-}

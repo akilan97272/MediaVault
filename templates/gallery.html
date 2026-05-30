@@ -5,12 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MediaVault — Gallery</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=SF+Pro+Display:wght@300;400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;500;600;700&family=Instrument+Serif:ital@1&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
+    <script>
+        (function() {
+            const t = localStorage.getItem('mv-theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', t);
+        })();
+    </script>
 </head>
 <body class="gallery-body">
 
-    <!-- Ambient background -->
     <div class="bg-orbs">
         <div class="orb orb-1"></div>
         <div class="orb orb-2"></div>
@@ -20,7 +25,11 @@
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
             <div class="sidebar-brand">
-                <svg viewBox="0 0 24 24" fill="none" class="brand-svg"><circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.7)" stroke-width="1.2"/><path d="M7 16l5-8 5 8" stroke="rgba(255,255,255,0.9)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="12" cy="12" r="1.5" fill="rgba(255,255,255,0.8)"/></svg>
+                <svg viewBox="0 0 24 24" fill="none" class="brand-svg">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.2" opacity="0.7"/>
+                    <path d="M7 16l5-8 5 8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                    <circle cx="12" cy="12" r="1.5" fill="currentColor" opacity="0.8"/>
+                </svg>
                 <span>MediaVault</span>
             </div>
             <button class="sidebar-close" id="sidebarClose">✕</button>
@@ -28,40 +37,46 @@
 
         <nav class="sidebar-nav">
             <div class="tree-section-label">Library</div>
-
-            <!-- Root -->
             <div class="tree-item tree-root active" data-path="" onclick="navigateTo('')">
                 <span class="tree-icon">🏠</span>
                 <span class="tree-label">All Media</span>
             </div>
-
-            <!-- Dynamic folder tree -->
             <div id="folderTree" class="folder-tree"></div>
         </nav>
 
-        <!-- Admin section -->
         {% if is_admin %}
         <div class="sidebar-admin">
             <div class="tree-section-label">Admin</div>
             <button class="sidebar-nav-btn" onclick="openUserManager()">
-                <span>👥</span> Manage Users
+                <svg viewBox="0 0 20 20" fill="none" width="16" height="16"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M4 17c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+                Manage Users
             </button>
         </div>
         {% endif %}
 
         <div class="sidebar-footer">
-            <span class="sidebar-user">Signed in as <strong>{{ user }}</strong></span>
-            <a href="/logout" class="sidebar-logout">Sign out</a>
+            <div class="sidebar-user-info">
+                <div class="sidebar-avatar">{{ user[0]|upper }}</div>
+                <div class="sidebar-user-details">
+                    <span class="sidebar-username">{{ user }}</span>
+                    {% if is_admin %}<span class="sidebar-role-badge">admin</span>{% endif %}
+                </div>
+            </div>
+            <div class="sidebar-footer-actions">
+                <button class="theme-toggle-sm" id="themeToggleSidebar" onclick="toggleTheme()" title="Toggle theme">
+                    <svg class="icon-sun" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="1.6"/><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                    <svg class="icon-moon" viewBox="0 0 24 24" fill="none"><path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                </button>
+                <a href="/logout" class="sidebar-logout">Sign out</a>
+            </div>
         </div>
     </aside>
 
-    <!-- Sidebar overlay -->
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
 
-    <!-- ===== MAIN CONTENT ===== -->
+    <!-- ===== MAIN ===== -->
     <div class="main-wrapper">
 
-        <!-- Top bar -->
         <header class="topbar glass-header">
             <button class="topbar-menu" id="menuBtn" onclick="openSidebar()">
                 <span></span><span></span><span></span>
@@ -70,13 +85,18 @@
                 <span id="pathBreadcrumb">All Media</span>
             </div>
             <div class="topbar-actions">
-                <button class="topbar-icon-btn" onclick="openUserManager()" id="adminBtn" title="Manage Users" style="display:none">
+                <button class="topbar-icon-btn" onclick="toggleTheme()" id="themeToggleTop" title="Toggle theme">
+                    <svg class="icon-sun" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="1.6"/><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                    <svg class="icon-moon" viewBox="0 0 24 24" fill="none"><path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                </button>
+                {% if is_admin %}
+                <button class="topbar-icon-btn" onclick="openUserManager()" title="Manage Users">
                     <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M4 17c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
                 </button>
+                {% endif %}
             </div>
         </header>
 
-        <!-- Path nav bar (breadcrumb) -->
         <div class="path-nav" id="pathNav" style="display:none">
             <button class="path-back-btn" onclick="goUp()">
                 <svg viewBox="0 0 20 20" fill="none"><path d="M13 5l-5 5 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -85,7 +105,6 @@
             <span class="path-label" id="pathLabel">/</span>
         </div>
 
-        <!-- Gallery Grid -->
         <main class="gallery-grid" id="galleryGrid">
             <div class="loading-state" id="loadingState">
                 <div class="loading-spinner"></div>
@@ -93,13 +112,11 @@
             </div>
         </main>
 
-        <!-- Empty state -->
         <div class="empty-state" id="emptyState" style="display:none">
             <div class="empty-icon">🖼</div>
             <p>No media here yet</p>
             <span>Upload files using the + button</span>
         </div>
-
     </div>
 
     <!-- ===== FABs ===== -->
@@ -116,7 +133,29 @@
     <!-- ===== LIGHTBOX ===== -->
     <div id="lightbox" class="lightbox">
         <div class="lightbox-topbar">
-            <button class="lb-btn-close" id="closeLightbox">✕</button>
+            <div class="slideshow-controls">
+                <div class="speed-picker" id="speedPicker">
+                    <span class="speed-label">Interval</span>
+                    <button class="speed-opt" data-sec="10">10s</button>
+                    <button class="speed-opt" data-sec="15">15s</button>
+                    <button class="speed-opt" data-sec="20">20s</button>
+                    <button class="speed-opt" data-sec="30">30s</button>
+                </div>
+                <button class="lb-btn-icon" id="slideshowBtn" title="Slideshow">
+                    <svg id="ssPlayIcon" viewBox="0 0 24 24" fill="none"><polygon points="6,4 20,12 6,20" fill="currentColor"/></svg>
+                    <svg id="ssPauseIcon" viewBox="0 0 24 24" fill="none" style="display:none"><rect x="5" y="4" width="4" height="16" rx="1" fill="currentColor"/><rect x="15" y="4" width="4" height="16" rx="1" fill="currentColor"/></svg>
+                </button>
+                <div class="ss-countdown" id="ssCountdown" style="display:none">
+                    <svg viewBox="0 0 36 36">
+                        <circle cx="18" cy="18" r="15" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="2.5"/>
+                        <circle id="ssRing" cx="18" cy="18" r="15" fill="none" stroke="var(--accent)" stroke-width="2.5"
+                            stroke-dasharray="94.25" stroke-dashoffset="0"
+                            stroke-linecap="round" transform="rotate(-90 18 18)"/>
+                    </svg>
+                    <span id="ssCountNum"></span>
+                </div>
+            </div>
+            <button class="lb-btn-close" id="closeLightbox">&#x2715;</button>
         </div>
         <button class="lb-nav lb-prev" id="prevBtn">&#10094;</button>
         <button class="lb-nav lb-next" id="nextBtn">&#10095;</button>
@@ -130,9 +169,7 @@
                 <h2>Manage Users</h2>
                 <button onclick="closeUserManager()" class="modal-close">✕</button>
             </div>
-
             <div class="modal-body">
-                <!-- Add user form -->
                 <div class="add-user-form">
                     <h3>Add New User</h3>
                     <div class="modal-row">
@@ -142,8 +179,6 @@
                     </div>
                     <div id="userFormMsg" class="form-msg"></div>
                 </div>
-
-                <!-- User list -->
                 <div class="user-list-section">
                     <h3>Existing Users</h3>
                     <div id="userList" class="user-list"></div>
@@ -153,7 +188,8 @@
     </div>
 
     <script>
-        window.IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+        window.IS_ADMIN   = {{ 'true' if is_admin else 'false' }};
+        window.CURRENT_USER = {{ user | tojson }};
     </script>
     <script src="/static/script.js"></script>
 </body>

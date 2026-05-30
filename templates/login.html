@@ -5,25 +5,43 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MediaVault — Sign In</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=SF+Pro+Display:wght@300;400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;500;600;700&family=Instrument+Serif:ital@1&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
+    <script>
+        // Apply saved theme before render to avoid flash
+        (function() {
+            const t = localStorage.getItem('mv-theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', t);
+        })();
+    </script>
 </head>
 <body class="login-body">
 
-    <!-- Ambient background orbs -->
     <div class="bg-orbs">
         <div class="orb orb-1"></div>
         <div class="orb orb-2"></div>
         <div class="orb orb-3"></div>
     </div>
 
+    <!-- Theme toggle (top-right) -->
+    <button class="theme-toggle" id="themeToggle" title="Toggle theme" onclick="toggleTheme()">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none">
+            <path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+    </button>
+
     <div class="login-container">
         <div class="glass-card login-card">
+
             <div class="login-brand">
                 <div class="brand-icon">
-                    <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <svg viewBox="0 0 40 40" fill="none">
                         <circle cx="20" cy="20" r="18" stroke="rgba(255,255,255,0.6)" stroke-width="1.5"/>
-                        <path d="M12 26 L20 14 L28 26" stroke="rgba(255,255,255,0.9)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                        <path d="M12 26L20 14L28 26" stroke="rgba(255,255,255,0.9)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
                         <circle cx="20" cy="20" r="3" fill="rgba(255,255,255,0.8)"/>
                     </svg>
                 </div>
@@ -31,28 +49,116 @@
                 <p class="brand-sub">Your private gallery</p>
             </div>
 
-            {% if request.query_params.get('error') %}
-            <div class="error-pill">
-                <span>⚠</span> Invalid credentials — try again
+            <!-- Tab switcher -->
+            <div class="auth-tabs">
+                <button class="auth-tab active" id="tabSignIn" onclick="switchTab('signin')">Sign In</button>
+                <button class="auth-tab" id="tabRegister" onclick="switchTab('register')">Create Account</button>
             </div>
-            {% endif %}
 
-            <form action="/login" method="post" class="login-form">
-                <div class="glass-input-group">
-                    <label>Username</label>
-                    <input type="text" name="username" class="glass-input" placeholder="Enter username" autocomplete="username" required>
+            <!-- Sign In -->
+            <div id="panelSignIn">
+                {% if request.query_params.get('error') %}
+                <div class="error-pill"><span>⚠</span> Invalid credentials — try again</div>
+                {% endif %}
+                <form action="/login" method="post" class="login-form">
+                    <div class="glass-input-group">
+                        <label>Username</label>
+                        <input type="text" name="username" class="glass-input" placeholder="Enter username" autocomplete="username" required>
+                    </div>
+                    <div class="glass-input-group">
+                        <label>Password</label>
+                        <input type="password" name="password" class="glass-input" placeholder="Enter password" autocomplete="current-password" required>
+                    </div>
+                    <button type="submit" class="glass-btn-primary">
+                        <span>Unlock Gallery</span>
+                        <svg viewBox="0 0 20 20" fill="none"><path d="M4 10h12M11 5l5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                </form>
+            </div>
+
+            <!-- Register -->
+            <div id="panelRegister" style="display:none">
+                <div id="regError" class="error-pill" style="display:none"></div>
+                <div id="regSuccess" class="success-pill" style="display:none"></div>
+                <div class="login-form">
+                    <div class="glass-input-group">
+                        <label>Username <span class="label-hint">3–30 chars, letters/numbers/_-</span></label>
+                        <input type="text" id="regUsername" class="glass-input" placeholder="Choose a username" autocomplete="off">
+                    </div>
+                    <div class="glass-input-group">
+                        <label>Password <span class="label-hint">Minimum 4 characters</span></label>
+                        <input type="password" id="regPassword" class="glass-input" placeholder="Choose a password">
+                    </div>
+                    <div class="glass-input-group">
+                        <label>Confirm Password</label>
+                        <input type="password" id="regConfirm" class="glass-input" placeholder="Repeat password">
+                    </div>
+                    <button class="glass-btn-primary" onclick="submitRegister()">
+                        <span>Create Account</span>
+                        <svg viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                    </button>
                 </div>
-                <div class="glass-input-group">
-                    <label>Password</label>
-                    <input type="password" name="password" class="glass-input" placeholder="Enter password" autocomplete="current-password" required>
-                </div>
-                <button type="submit" class="glass-btn-primary">
-                    <span>Unlock Gallery</span>
-                    <svg viewBox="0 0 20 20" fill="none"><path d="M4 10h12M11 5l5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                </button>
-            </form>
+            </div>
+
         </div>
     </div>
 
+<script>
+function switchTab(tab) {
+    const isSignIn = tab === 'signin';
+    document.getElementById('panelSignIn').style.display  = isSignIn ? '' : 'none';
+    document.getElementById('panelRegister').style.display = isSignIn ? 'none' : '';
+    document.getElementById('tabSignIn').classList.toggle('active', isSignIn);
+    document.getElementById('tabRegister').classList.toggle('active', !isSignIn);
+}
+
+async function submitRegister() {
+    const u  = document.getElementById('regUsername').value.trim();
+    const p  = document.getElementById('regPassword').value;
+    const p2 = document.getElementById('regConfirm').value;
+    const errEl = document.getElementById('regError');
+    const okEl  = document.getElementById('regSuccess');
+
+    errEl.style.display = 'none';
+    okEl.style.display  = 'none';
+
+    if (!u || !p) { showReg('error', 'All fields required'); return; }
+    if (p !== p2) { showReg('error', 'Passwords do not match'); return; }
+
+    const fd = new FormData();
+    fd.append('username', u);
+    fd.append('password', p);
+
+    const res  = await fetch('/api/register', { method: 'POST', body: fd });
+    const data = await res.json();
+
+    if (res.ok) {
+        showReg('success', `Account "${u}" created! You can now sign in.`);
+        document.getElementById('regUsername').value = '';
+        document.getElementById('regPassword').value = '';
+        document.getElementById('regConfirm').value  = '';
+        setTimeout(() => switchTab('signin'), 2200);
+    } else {
+        showReg('error', data.error || 'Registration failed');
+    }
+}
+
+function showReg(type, msg) {
+    const el = document.getElementById(type === 'error' ? 'regError' : 'regSuccess');
+    el.textContent = (type === 'error' ? '⚠ ' : '✓ ') + msg;
+    el.style.display = 'block';
+}
+
+// Theme
+function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme') || 'dark';
+    const next = current === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('mv-theme', next);
+}
+
+// If URL has ?register=1, open register tab
+if (new URLSearchParams(location.search).get('register')) switchTab('register');
+</script>
 </body>
 </html>
