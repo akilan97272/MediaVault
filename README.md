@@ -1,6 +1,6 @@
 # MediaVault
 
-A self-hosted private media gallery with per-user folders, shared space, and a liquid glass UI.
+A self-hosted private media gallery with per-user folders and shared space.
 
 ---
 
