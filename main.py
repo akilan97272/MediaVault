@@ -135,7 +135,11 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 def login_page(request: Request):
     if is_authenticated(request):
         return RedirectResponse("/gallery", status_code=302)
-    return templates.TemplateResponse(request, "login.html")
+    response = templates.TemplateResponse(request, "login.html")
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"]        = "no-cache"
+    response.headers["Expires"]       = "0"
+    return response
 
 
 @app.post("/login")
