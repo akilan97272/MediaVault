@@ -191,6 +191,22 @@
         window.IS_ADMIN   = {{ 'true' if is_admin else 'false' }};
         window.CURRENT_USER = {{ user | tojson }};
     </script>
+    <script>
+        (function lockBrowserBack() {
+            if (!window.history || !window.history.pushState) return;
+            const guardState = { mediaVaultHistoryGuard: true };
+            window.history.replaceState(guardState, '', window.location.href);
+            window.history.pushState(guardState, '', window.location.href);
+            window.addEventListener('popstate', function () {
+                window.history.pushState(guardState, '', window.location.href);
+            });
+            window.addEventListener('pageshow', function (event) {
+                if (event.persisted) {
+                    window.history.pushState(guardState, '', window.location.href);
+                }
+            });
+        })();
+    </script>
     <script src="/static/script.js"></script>
 </body>
 </html>
