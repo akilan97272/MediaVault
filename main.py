@@ -228,6 +228,16 @@ def get_current_user(request: Request) -> str | None:
         return None
 
 
+def day_restricted_response(username: str) -> JSONResponse | None:
+    if is_allowed_today(username):
+        return None
+    day = _DAY_NAMES[datetime.now().weekday()]
+    return JSONResponse(
+        status_code=403,
+        content={"error": "Access restricted", "day": day},
+    )
+
+
 # ── Access control ────────────────────────────────────────────────────────────
 
 def can_access_path(username: str, path: str) -> bool:
@@ -413,6 +423,9 @@ def list_media(request: Request, path: str = ""):
     user = get_current_user(request)
     if not user:
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    restricted = day_restricted_response(user)
+    if restricted:
+        return restricted
     if not can_access_path(user, path):
         return JSONResponse(status_code=403, content={"error": "Access denied"})
 
@@ -452,6 +465,9 @@ def get_folder_tree(request: Request):
     user = get_current_user(request)
     if not user:
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    restricted = day_restricted_response(user)
+    if restricted:
+        return restricted
 
     allowed = visible_top_folders(user)
 
@@ -486,6 +502,9 @@ def create_folder(request: Request,
     user = get_current_user(request)
     if not user:
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    restricted = day_restricted_response(user)
+    if restricted:
+        return restricted
     if not can_access_path(user, path):
         return JSONResponse(status_code=403, content={"error": "Access denied"})
 
@@ -506,6 +525,9 @@ async def upload_media(request: Request,
     user = get_current_user(request)
     if not user:
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    restricted = day_restricted_response(user)
+    if restricted:
+        return restricted
     if not can_access_path(user, path):
         return JSONResponse(status_code=403, content={"error": "Access denied"})
 
@@ -556,6 +578,9 @@ def delete_media(request: Request, path: str = "", filename: str = ""):
     user = get_current_user(request)
     if not user:
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    restricted = day_restricted_response(user)
+    if restricted:
+        return restricted
 
     full_sub = f"{path}/{filename}" if path else filename
     if not can_access_path(user, full_sub):
