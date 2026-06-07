@@ -35,6 +35,23 @@ document.addEventListener('DOMContentLoaded', () => {
     loadMedia('');
     loadFolderTree();
 
+    function redirectIfRestricted(response) {
+        if (response.status === 401) {
+            location.href = '/';
+            return true;
+        }
+        if (response.status === 403) {
+            response.clone().json()
+                .then(data => {
+                    if (data.error === 'Access restricted') {
+                        location.replace(`/?error=day&day=${encodeURIComponent(data.day || '')}`);
+                    }
+                })
+                .catch(() => {});
+        }
+        return false;
+    }
+
     // =====================
     // THEME
     // =====================
@@ -61,8 +78,12 @@ document.addEventListener('DOMContentLoaded', () => {
         );
 
         fetch(`/api/media?path=${encodeURIComponent(path)}`)
-            .then(r => { if (r.status === 401) { location.href = '/'; } return r.json(); })
+            .then(r => {
+                if (redirectIfRestricted(r)) return null;
+                return r.json();
+            })
             .then(data => {
+                if (!data) return;
                 if (loadingState) loadingState.style.display = 'none';
                 allFolders = data.folders || [];
                 allFiles   = data.files   || [];
@@ -211,8 +232,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // =====================
     function loadFolderTree() {
         fetch('/api/tree')
-            .then(r => r.json())
+            .then(r => {
+                if (redirectIfRestricted(r)) return null;
+                return r.json();
+            })
             .then(data => {
+                if (!data) return;
                 if (!folderTree) return;
                 folderTree.innerHTML = renderTreeNodes(data.tree || [], 1);
                 folderTree.querySelectorAll('.tree-item[data-path]').forEach(el => {
