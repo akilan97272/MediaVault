@@ -1,7 +1,3 @@
-"""
-MediaVault — main.py
-Optimized for low-end servers and Firefox Focus compatibility.
-"""
 import os
 import re
 import json
@@ -18,6 +14,7 @@ from itsdangerous import Signer
 from passlib.context import CryptContext
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from dotenv import load_dotenv
+from datetime import datetime
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -119,12 +116,42 @@ def _ensure_user_folder(username: str) -> None:
         os.makedirs(os.path.join(MEDIA_DIR, username), exist_ok=True)
 
 
-# ── Template cache ─────────────────────────────────────────────────────────────
-#
-# cache_size=0 disables Jinja2's internal LRU cache (avoids the
-# "unhashable type: dict" bug in Jinja2 3.x + Starlette).
-# We pre-load and cache Template objects ourselves in _tpl_store so every
-# subsequent request gets an already-compiled Template with zero disk I/O.
+RESTRICTIONS_FILE = os.path.join(BASE_DIR, "restrictions.json")
+_DAY_NAMES        = ("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday")
+
+_restr_cache: dict | None = None
+_restr_lock  = threading.Lock()
+
+
+def load_restrictions() -> dict:
+    global _restr_cache
+    if _restr_cache is not None:
+        return _restr_cache
+    with _restr_lock:
+        if _restr_cache is None:
+            _restr_cache = json.load(open(RESTRICTIONS_FILE)) \
+                           if os.path.exists(RESTRICTIONS_FILE) else {}
+    return _restr_cache
+
+
+def save_restrictions(r: dict) -> None:
+    global _restr_cache
+    with _restr_lock:
+        tmp = RESTRICTIONS_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(r, f, separators=(',', ':'))
+        os.replace(tmp, RESTRICTIONS_FILE)
+        _restr_cache = r
+
+
+def is_allowed_today(username: str) -> bool:
+    """True if the user has no restriction, or today is in their allowed days."""
+    if username == "admin":
+        return True
+    cfg = load_restrictions().get(username)
+    if not cfg or not cfg.get("enabled", False):
+        return True
+    return datetime.now().weekday() in cfg.get("allowed_days", [])
 
 _jinja_env = Environment(
     loader=FileSystemLoader(os.path.join(BASE_DIR, "templates")),
@@ -159,14 +186,12 @@ def render(request: Request, name: str,
 
 # ── App bootstrap ─────────────────────────────────────────────────────────────
 
-@asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # Warm both caches before the first request hits
     load_users()
+    load_restrictions()          # ← warm the new cache
     for _n in ("login.html", "gallery.html", "404.html"):
         _tpl(_n)
     yield
-    # nothing to clean up
 
 app = FastAPI(
     lifespan=lifespan,
@@ -245,12 +270,14 @@ def login(username: str = Form(...), password: str = Form(...)):
     users = load_users()
     h = users.get(username)
     if h and pwd_context.verify(password, h):
+        if not is_allowed_today(username):
+            day = _DAY_NAMES[datetime.now().weekday()]
+            return RedirectResponse(f"/?error=day&day={day}", status_code=302)
         r = RedirectResponse("/gallery", status_code=302)
         r.set_cookie("session", signer.sign(username).decode(),
                      httponly=True, samesite="lax", secure=False)
         return r
-    return RedirectResponse("/?error=1", status_code=302)
-
+    return RedirectResponse("/?error=cred", status_code=302)
 
 @app.post("/api/register")
 async def register(username: str = Form(...), password: str = Form(...)):
@@ -279,10 +306,15 @@ def gallery_page(request: Request):
         r = render(request, "404.html", status=404)
         r.headers.update(_NO_CACHE)
         return r
+    # Block mid-session if the day changes while cookie is still alive
+    if not is_allowed_today(user):
+        day = _DAY_NAMES[datetime.now().weekday()]
+        r   = RedirectResponse(f"/?error=day&day={day}", status_code=302)
+        r.headers.update(_NO_CACHE)
+        return r
     r = render(request, "gallery.html", {"user": user, "is_admin": user == "admin"})
     r.headers.update(_NO_CACHE)
     return r
-
 
 @app.get("/logout")
 def logout():
@@ -335,6 +367,43 @@ def delete_user(username: str, request: Request):
     del new[username]
     save_users(new)
     return {"status": "deleted"}
+
+# ── Restriction API (admin only) ──────────────────────────────────────────────
+
+@app.get("/api/restrictions")
+def get_restrictions(request: Request):
+    if get_current_user(request) != "admin":
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    return {"restrictions": load_restrictions()}
+
+
+@app.post("/api/restrictions/{username}")
+async def set_restriction(username: str, request: Request):
+    if get_current_user(request) != "admin":
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    if username not in load_users():
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    try:
+        body = await request.json()
+        enabled  = bool(body.get("enabled", False))
+        raw_days = body.get("allowed_days", [])
+        days     = [int(d) for d in raw_days if 0 <= int(d) <= 6]
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Invalid body"})
+    r = dict(load_restrictions())
+    r[username] = {"enabled": enabled, "allowed_days": days}
+    save_restrictions(r)
+    return {"status": "updated", "username": username}
+
+
+@app.delete("/api/restrictions/{username}")
+def delete_restriction(username: str, request: Request):
+    if get_current_user(request) != "admin":
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    r = dict(load_restrictions())
+    r.pop(username, None)
+    save_restrictions(r)
+    return {"status": "removed"}
 
 
 # ── Media API ─────────────────────────────────────────────────────────────────

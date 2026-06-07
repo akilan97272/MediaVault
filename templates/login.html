@@ -57,8 +57,18 @@
 
             <!-- Sign In -->
             <div id="panelSignIn">
-                {% if request.query_params.get('error') %}
-                <div class="error-pill"><span>⚠</span> Invalid credentials — try again</div>
+                {% set _err = request.query_params.get('error') %}
+                {% if _err == 'cred' %}
+                <div class="error-pill"><span>⚠</span> Invalid username or password</div>
+                {% elif _err == 'day' %}
+                <div class="error-pill error-day">
+                    <svg viewBox="0 0 20 20" fill="none" width="15" height="15" style="flex-shrink:0">
+                        <circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.5"/>
+                        <path d="M10 6v4l2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                    Access restricted — not available on
+                    <strong>{{ request.query_params.get('day','today') }}s</strong>
+                </div>
                 {% endif %}
                 <form action="/login" method="post" class="login-form">
                     <div class="glass-input-group">

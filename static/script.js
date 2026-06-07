@@ -15,10 +15,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const loadingState = document.getElementById('loadingState');
     const folderTree   = document.getElementById('folderTree');
 
-    // ---- App State ----
     let mediaFiles  = [];
     let currentPath = '';
     let currentIdx  = 0;
+
+    // ── Pagination ─────────────────────────────────────────────
+    const PAGE_SIZE  = 25;
+    let   currentPage = 1;
+    let   allFolders  = [];  
+    let   allFiles    = [];
 
     // ---- Zoom State ----
     let scale = 1, pointX = 0, pointY = 0;
@@ -44,13 +49,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // MEDIA LOADING
     // =====================
     function loadMedia(path) {
-        currentPath = path;
+        currentPath  = path;
+        currentPage  = 1;           // reset to page 1 on every navigation
         grid.innerHTML = '';
         if (loadingState) loadingState.style.display = 'flex';
         if (emptyState)   emptyState.style.display   = 'none';
 
         updateBreadcrumb(path);
-
         document.querySelectorAll('.tree-item').forEach(el =>
             el.classList.toggle('active', el.dataset.path === path)
         );
@@ -59,8 +64,10 @@ document.addEventListener('DOMContentLoaded', () => {
             .then(r => { if (r.status === 401) { location.href = '/'; } return r.json(); })
             .then(data => {
                 if (loadingState) loadingState.style.display = 'none';
-                mediaFiles = data.files || [];
-                renderGrid(data.folders || [], data.files || []);
+                allFolders = data.folders || [];
+                allFiles   = data.files   || [];
+                mediaFiles = allFiles;          // lightbox always sees full list
+                renderPage();
             })
             .catch(() => { if (loadingState) loadingState.style.display = 'none'; });
     }
@@ -79,65 +86,125 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =====================
-    // RENDER GRID
+    // RENDER PAGE (paginated)
     // =====================
-    function renderGrid(folders, files) {
+    function renderPage() {
         grid.innerHTML = '';
 
-        if (folders.length === 0 && files.length === 0) {
+        // Build a flat combined array so folders + files share one index space
+        const combined = [
+            ...allFolders.map(n  => ({ kind: 'folder', name: n })),
+            ...allFiles  .map((n, i) => ({ kind: 'file',   name: n, fileIdx: i })),
+        ];
+        const total      = combined.length;
+        const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+        currentPage      = Math.min(currentPage, totalPages);
+
+        if (total === 0) {
             if (emptyState) emptyState.style.display = 'flex';
+            renderPagination(0, 1, 1);
             return;
         }
+        if (emptyState) emptyState.style.display = 'none';
 
-        folders.forEach(name => {
-            const isShared = name === 'shared' && !currentPath;
-            const isOwnFolder = name === window.CURRENT_USER;
-            const item = document.createElement('div');
-            item.className = `media-item folder-item${isShared ? ' folder-shared' : ''}`;
-            item.innerHTML = `
-                <div class="folder-body">
-                    <div class="folder-icon-wrap">
-                        <svg viewBox="0 0 48 48" fill="none">
-                            <path d="M6 12a4 4 0 014-4h9l4 4h15a4 4 0 014 4v20a4 4 0 01-4 4H10a4 4 0 01-4-4V12z"
-                                  fill="var(--folder-fill)" stroke="var(--folder-stroke)" stroke-width="1.5"/>
-                            <path d="M6 18h36" stroke="var(--folder-stroke)" stroke-width="1" opacity="0.5"/>
-                        </svg>
-                    </div>
-                    <span class="folder-label">${escapeHtml(name)}</span>
-                    ${isShared ? '<span class="folder-tag">shared</span>' : ''}
-                    ${isOwnFolder ? '<span class="folder-tag own">yours</span>' : ''}
-                </div>`;
-            item.addEventListener('click', () => {
-                const newPath = currentPath ? `${currentPath}/${name}` : name;
-                loadMedia(newPath);
-                loadFolderTree();
-            });
-            // Only allow delete for non-shared, accessible folders
-            if (!isShared) {
-                item.addEventListener('contextmenu', e => { e.preventDefault(); confirmDelete('', name, true); });
-            }
-            grid.appendChild(item);
-        });
+        const slice = combined.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
-        files.forEach((file, idx) => {
-            const item    = document.createElement('div');
-            item.className = 'media-item';
-            const urlPath = currentPath ? `${currentPath}/${file}` : file;
-            const url     = `/media/${urlPath}`;
-            const isVideo = /\.(mp4|webm|mkv)$/i.test(file);
+        slice.forEach(item => {
+            if (item.kind === 'folder') {
+                const name       = item.name;
+                const isShared   = name === 'shared' && !currentPath;
+                const isOwn      = name === window.CURRENT_USER;
+                const el         = document.createElement('div');
+                el.className     = `media-item folder-item${isShared ? ' folder-shared' : ''}`;
+                el.innerHTML     = `
+                    <div class="folder-body">
+                        <div class="folder-icon-wrap">
+                            <svg viewBox="0 0 48 48" fill="none">
+                                <path d="M6 12a4 4 0 014-4h9l4 4h15a4 4 0 014 4v20a4 4 0 01-4 4H10a4 4 0 01-4-4V12z"
+                                      fill="var(--folder-fill)" stroke="var(--folder-stroke)" stroke-width="1.5"/>
+                                <path d="M6 18h36" stroke="var(--folder-stroke)" stroke-width="1" opacity="0.5"/>
+                            </svg>
+                        </div>
+                        <span class="folder-label">${escapeHtml(name)}</span>
+                        ${isShared ? '<span class="folder-tag">shared</span>' : ''}
+                        ${isOwn    ? '<span class="folder-tag own">yours</span>'  : ''}
+                    </div>`;
+                el.addEventListener('click', () => {
+                    loadMedia(currentPath ? `${currentPath}/${name}` : name);
+                    loadFolderTree();
+                });
+                if (!isShared) {
+                    el.addEventListener('contextmenu', e => {
+                        e.preventDefault(); confirmDelete('', name, true);
+                    });
+                }
+                grid.appendChild(el);
 
-            if (isVideo) {
-                item.innerHTML = `<video src="${url}#t=0.1" preload="metadata" muted playsinline></video>
-                    <div class="video-badge"><svg viewBox="0 0 16 16" fill="none"><polygon points="5,3 13,8 5,13" fill="white"/></svg></div>`;
             } else {
-                item.innerHTML = `<img src="${url}" loading="lazy" alt="${escapeHtml(file)}">`;
+                const file    = item.name;
+                const fileIdx = item.fileIdx;   // original index in allFiles / mediaFiles
+                const urlPath = currentPath ? `${currentPath}/${file}` : file;
+                const url     = `/media/${urlPath}`;
+                const isVideo = /\.(mp4|webm|mkv)$/i.test(file);
+                const el      = document.createElement('div');
+                el.className  = 'media-item';
+                el.innerHTML  = isVideo
+                    ? `<video src="${url}#t=0.1" preload="metadata" muted playsinline></video>
+                       <div class="video-badge"><svg viewBox="0 0 16 16" fill="none"><polygon points="5,3 13,8 5,13" fill="white"/></svg></div>`
+                    : `<img src="${url}" loading="lazy" alt="${escapeHtml(file)}">`;
+                el.addEventListener('click', () => openLightbox(fileIdx));
+                el.addEventListener('contextmenu', e => {
+                    e.preventDefault(); confirmDelete(currentPath, file, false);
+                });
+                grid.appendChild(el);
             }
-
-            item.addEventListener('click', () => openLightbox(idx));
-            item.addEventListener('contextmenu', e => { e.preventDefault(); confirmDelete(currentPath, file, false); });
-            grid.appendChild(item);
         });
+
+        renderPagination(total, currentPage, totalPages);
     }
+
+    function renderPagination(total, page, totalPages) {
+        const bar = document.getElementById('paginationBar');
+        if (!bar) return;
+        if (totalPages <= 1) { bar.style.display = 'none'; return; }
+
+        bar.style.display = 'flex';
+
+        const start = (page - 1) * PAGE_SIZE + 1;
+        const end   = Math.min(page * PAGE_SIZE, total);
+
+        // Build compact page number list with ellipsis
+        let nums = [];
+        if (totalPages <= 7) {
+            nums = Array.from({ length: totalPages }, (_, i) => i + 1);
+        } else if (page <= 3) {
+            nums = [1, 2, 3, 4, '…', totalPages];
+        } else if (page >= totalPages - 2) {
+            nums = [1, '…', totalPages-3, totalPages-2, totalPages-1, totalPages];
+        } else {
+            nums = [1, '…', page - 1, page, page + 1, '…', totalPages];
+        }
+
+        bar.innerHTML = `
+            <span class="pg-info">Showing <strong>${start}–${end}</strong> of <strong>${total}</strong></span>
+            <div class="pg-controls">
+                <button class="pg-btn pg-arrow" onclick="goToPage(${page - 1})" ${page === 1 ? 'disabled' : ''} title="Previous">&#10094;</button>
+                ${nums.map(n => n === '…'
+                    ? `<span class="pg-dots">…</span>`
+                    : `<button class="pg-btn${n === page ? ' pg-active' : ''}" onclick="goToPage(${n})">${n}</button>`
+                ).join('')}
+                <button class="pg-btn pg-arrow" onclick="goToPage(${page + 1})" ${page === totalPages ? 'disabled' : ''} title="Next">&#10095;</button>
+            </div>`;
+    }
+
+    window.goToPage = function (page) {
+        const totalPages = Math.max(1, Math.ceil((allFolders.length + allFiles.length) / PAGE_SIZE));
+        if (page < 1 || page > totalPages) return;
+        currentPage = page;
+        renderPage();
+        // Scroll grid back to top smoothly
+        grid.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
 
     // =====================
     // FOLDER TREE (Sidebar)
@@ -473,20 +540,95 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.target === document.getElementById('userModal')) closeUserManager();
     });
 
-    function loadUserList() {
-        fetch('/api/users').then(r => r.json()).then(data => {
-            const list = document.getElementById('userList');
+function loadUserList() {
+        Promise.all([
+            fetch('/api/users').then(r => r.json()),
+            fetch('/api/restrictions').then(r => r.json()),
+        ]).then(([uData, rData]) => {
+            const list  = document.getElementById('userList');
             if (!list) return;
-            list.innerHTML = (data.users || []).map(u => `
-                <div class="user-row">
-                    <div class="user-avatar">${u[0].toUpperCase()}</div>
-                    <span class="user-name">${escapeHtml(u)}</span>
-                    ${u !== 'admin'
-                        ? `<button class="delete-user-btn" onclick="deleteUser('${escapeHtml(u)}')">Remove</button>`
-                        : '<span class="user-badge">admin</span>'}
-                </div>`).join('');
+            const restr = rData.restrictions || {};
+            const DAYS  = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+            list.innerHTML = (uData.users || []).map(u => {
+                const rc      = restr[u] || { enabled: false, allowed_days: [] };
+                const isAdmin = u === 'admin';
+                return `
+                <div class="user-row" id="urow-${escapeHtml(u)}">
+                    <div class="user-row-main">
+                        <div class="user-avatar">${u[0].toUpperCase()}</div>
+                        <span class="user-name">${escapeHtml(u)}</span>
+                        ${rc.enabled ? '<span class="restrict-badge">Restricted</span>' : ''}
+                        <div class="user-row-actions">
+                            ${!isAdmin ? `
+                                <button class="restrict-btn" title="Set access days"
+                                    onclick="toggleRestrictPanel('${escapeHtml(u)}')">🗓</button>
+                                <button class="delete-user-btn"
+                                    onclick="deleteUser('${escapeHtml(u)}')">Remove</button>
+                            ` : '<span class="user-badge">admin</span>'}
+                        </div>
+                    </div>
+                    ${!isAdmin ? `
+                    <div class="restrict-panel" id="rp-${escapeHtml(u)}" style="display:none">
+                        <div class="restrict-header">
+                            <span>Access restriction</span>
+                            <label class="toggle-switch" title="${rc.enabled ? 'Enabled' : 'Disabled'}">
+                                <input type="checkbox" id="re-${escapeHtml(u)}"
+                                    ${rc.enabled ? 'checked' : ''}
+                                    onchange="onRestrictToggle('${escapeHtml(u)}')">
+                                <span class="toggle-track"></span>
+                            </label>
+                        </div>
+                        <div class="restrict-days" id="rd-${escapeHtml(u)}"
+                             style="${rc.enabled ? '' : 'display:none'}">
+                            ${DAYS.map((d, i) => `
+                                <button class="day-btn ${rc.allowed_days.includes(i) ? 'active' : ''}"
+                                        data-day="${i}">
+                                    ${d}
+                                </button>`).join('')}
+                            <button class="save-restrict-btn"
+                                onclick="saveRestriction('${escapeHtml(u)}')">Save</button>
+                        </div>
+                    </div>
+                    ` : ''}
+                </div>`;
+            }).join('');
+
+            // Wire day-btn toggles (can't use inline onclick with CSP-safe approach)
+            list.querySelectorAll('.day-btn').forEach(btn => {
+                btn.addEventListener('click', () => btn.classList.toggle('active'));
+            });
         });
     }
+
+    window.toggleRestrictPanel = function (u) {
+        const p = document.getElementById(`rp-${u}`);
+        if (p) p.style.display = p.style.display === 'none' ? 'block' : 'none';
+    };
+
+    window.onRestrictToggle = function (u) {
+        const enabled = document.getElementById(`re-${u}`).checked;
+        const days    = document.getElementById(`rd-${u}`);
+        if (days) days.style.display = enabled ? 'flex' : 'none';
+    };
+
+    window.saveRestriction = async function (u) {
+        const enabled     = document.getElementById(`re-${u}`).checked;
+        const activeDays  = [...document.querySelectorAll(`#rd-${u} .day-btn.active`)]
+                               .map(b => parseInt(b.dataset.day));
+        const res = await fetch(`/api/restrictions/${encodeURIComponent(u)}`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ enabled, allowed_days: activeDays }),
+        });
+        const msg = document.getElementById('userFormMsg');
+        if (res.ok) {
+            showFormMsg(msg, 'success', `Restrictions saved for "${u}"`);
+            loadUserList();
+        } else {
+            showFormMsg(msg, 'error', 'Failed to save restrictions');
+        }
+    };
 
     window.createUser = async function () {
         const username = document.getElementById('newUsername').value.trim();
