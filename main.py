@@ -16,6 +16,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from dotenv import load_dotenv
 from datetime import datetime
 
+# File renamer scheduler
+from workerFiles.file_renamer_scheduler import start_scheduler, stop_scheduler, get_scheduler_status
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 load_dotenv()
@@ -286,11 +289,19 @@ def render(request: Request, name: str,
 # ── App bootstrap ─────────────────────────────────────────────────────────────
 
 async def lifespan(_app: FastAPI):
+    # Startup
     load_users()
     load_restrictions()          # ← warm the new cache
     for _n in ("login.html", "gallery.html", "404.html"):
         _tpl(_n)
+    
+    # Start file renamer scheduler (every 2 hours)
+    start_scheduler()
+    
     yield
+    
+    # Shutdown
+    stop_scheduler()
 
 app = FastAPI(
     lifespan=lifespan,
@@ -495,6 +506,13 @@ def get_activity_log_endpoint(request: Request):
         return JSONResponse(status_code=403, content={"error": "Forbidden"})
     activities = get_activity_log()
     return {"activities": activities}
+
+@app.get("/api/admin/scheduler-status")
+def get_scheduler_status_endpoint(request: Request):
+    """Get status of file renamer scheduler (admin only)."""
+    if get_current_user(request) != "admin":
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    return get_scheduler_status()
 
 # ── Restriction API (admin only) ──────────────────────────────────────────────
 

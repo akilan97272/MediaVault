@@ -759,3 +759,103 @@ body {
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:rgba(128,128,128,0.2);border-radius:3px; }
 ::-webkit-scrollbar-thumb:hover { background:rgba(128,128,128,0.35); }
+
+
+/* ── Multi-select ─────────────────────────────────────────────────────────── */
+.media-item.selected {
+    outline: 2.5px solid var(--accent);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 5px var(--accent-glow), 0 8px 24px var(--glass-shadow);
+    transform: scale(0.97);
+}
+.media-item.selected::after {
+    content: '✓';
+    position: absolute;
+    top: 6px; right: 6px;
+    width: 20px; height: 20px;
+    background: var(--accent);
+    border-radius: 50%;
+    font-size: 0.65rem;
+    font-weight: 800;
+    color: #000;
+    text-align: center;
+    line-height: 20px;
+    z-index: 2;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+
+/* ── Selection action bar ─────────────────────────────────────────────────── */
+.selection-bar {
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px;
+    gap: 12px;
+    background: rgba(99,185,255,0.07);
+    border-bottom: 1px solid rgba(99,185,255,0.18);
+    backdrop-filter: blur(14px);
+    animation: sel-slide 0.18s ease;
+    flex-shrink: 0;
+}
+[data-theme="light"] .selection-bar {
+    background: rgba(0,112,204,0.06);
+    border-bottom-color: rgba(0,112,204,0.15);
+}
+@keyframes sel-slide {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.sel-count {
+    flex: 1; text-align: center;
+    font-size: 0.88rem; font-weight: 600;
+    color: var(--accent);
+}
+.sel-cancel, .sel-delete {
+    display: flex; align-items: center; gap: 5px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 9px;
+    color: var(--text-2);
+    font-size: 0.83rem; font-family: inherit;
+    padding: 7px 13px; cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+.sel-cancel:hover { background: rgba(128,128,128,0.12); color: var(--text-1); }
+.sel-delete {
+    border-color: rgba(217,48,37,0.30);
+    color: rgba(217,48,37,0.75);
+}
+.sel-delete:hover { background: rgba(217,48,37,0.10); color: var(--error); }
+
+/* ── Top pagination bar ───────────────────────────────────────────────────── */
+.pagination-top {
+    padding-top: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--glass-border);
+    margin-bottom: 2px;
+}
+
+/* ── File count badge ─────────────────────────────────────────────────────── */
+.pg-summary {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.pg-total-badge {
+    font-size: 0.72rem; font-weight: 600;
+    padding: 2px 8px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 999px;
+    color: var(--text-3);
+    white-space: nowrap;
+}
+
+/* ── Mobile overrides ─────────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+    .selection-bar  { padding: 9px 12px; gap: 8px; }
+    .sel-cancel, .sel-delete { padding: 6px 10px; font-size: 0.78rem; }
+    .sel-count      { font-size: 0.80rem; }
+    .media-item.selected::after { width: 17px; height: 17px; font-size: 0.58rem; line-height: 17px; top: 5px; right: 5px; }
+    .pagination-top { padding-top: 8px; padding-bottom: 4px; }
+    .pg-total-badge { font-size: 0.68rem; }
+}

@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let   currentPage = 1;
     let   allFolders  = [];  
     let   allFiles    = [];
+    const selectedItems = new Map();
 
     // ---- Zoom State ----
     let scale = 1, pointX = 0, pointY = 0;
@@ -106,6 +107,44 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function addLongPress(el, cb) {
+        let t;
+        el.addEventListener('touchstart', () => { t = setTimeout(cb, 500); }, { passive: true });
+        el.addEventListener('touchend',   () => clearTimeout(t), { passive: true });
+        el.addEventListener('touchmove',  () => clearTimeout(t), { passive: true });
+    }
+
+    function toggleSelect(el, key, meta) {
+        if (selectedItems.has(key)) {
+            selectedItems.delete(key);
+            el.classList.remove('selected');
+        } else {
+            selectedItems.set(key, meta);
+            el.classList.add('selected');
+        }
+        const n   = selectedItems.size;
+        const bar = document.getElementById('selectionBar');
+        bar.style.display = n ? 'flex' : 'none';
+        document.getElementById('selCount').textContent = `${n} item${n !== 1 ? 's' : ''} selected`;
+    }
+
+    window.clearSelection = function () {
+        selectedItems.clear();
+        document.querySelectorAll('.media-item.selected').forEach(el => el.classList.remove('selected'));
+        document.getElementById('selectionBar').style.display = 'none';
+    };
+
+    window.deleteSelected = async function () {
+        const n = selectedItems.size;
+        if (!n || !confirm(`Delete ${n} item${n > 1 ? 's' : ''}? This cannot be undone.`)) return;
+        await Promise.allSettled([...selectedItems.values()].map(m =>
+            fetch(`/api/media?${new URLSearchParams({ path: m.path, filename: m.name })}`, { method: 'DELETE' })
+        ));
+        clearSelection();
+        loadMedia(currentPath);
+        loadFolderTree();
+    };
+
     // =====================
     // RENDER PAGE (paginated)
     // =====================
@@ -130,14 +169,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const slice = combined.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
-        slice.forEach(item => {
+slice.forEach(item => {
             if (item.kind === 'folder') {
-                const name       = item.name;
-                const isShared   = name === 'shared' && !currentPath;
-                const isOwn      = name === window.CURRENT_USER;
-                const el         = document.createElement('div');
-                el.className     = `media-item folder-item${isShared ? ' folder-shared' : ''}`;
-                el.innerHTML     = `
+                const name     = item.name;
+                const isShared = name === 'shared' && !currentPath;
+                const isOwn    = name === window.CURRENT_USER;
+                const el       = document.createElement('div');
+                el.className   = `media-item folder-item${isShared ? ' folder-shared' : ''}`;
+                el.innerHTML   = `
                     <div class="folder-body">
                         <div class="folder-icon-wrap">
                             <svg viewBox="0 0 48 48" fill="none">
@@ -148,35 +187,50 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                         <span class="folder-label">${escapeHtml(name)}</span>
                         ${isShared ? '<span class="folder-tag">shared</span>' : ''}
-                        ${isOwn    ? '<span class="folder-tag own">yours</span>'  : ''}
+                        ${isOwn    ? '<span class="folder-tag own">yours</span>' : ''}
                     </div>`;
+                const folderKey  = `folder:${name}`;
+                const folderMeta = { type: 'folder', name, path: currentPath };
                 el.addEventListener('click', () => {
+                    if (selectedItems.size > 0) {
+                        if (!isShared) toggleSelect(el, folderKey, folderMeta);
+                        return;
+                    }
                     loadMedia(currentPath ? `${currentPath}/${name}` : name);
                     loadFolderTree();
                 });
                 if (!isShared) {
                     el.addEventListener('contextmenu', e => {
-                        e.preventDefault(); confirmDelete('', name, true);
+                        e.preventDefault();
+                        toggleSelect(el, folderKey, folderMeta);
                     });
+                    addLongPress(el, () => toggleSelect(el, folderKey, folderMeta));
                 }
                 grid.appendChild(el);
 
             } else {
-                const file    = item.name;
-                const fileIdx = item.fileIdx;   // original index in allFiles / mediaFiles
-                const urlPath = currentPath ? `${currentPath}/${file}` : file;
-                const url     = `/media/${urlPath}`;
-                const isVideo = /\.(mp4|webm|mkv)$/i.test(file);
-                const el      = document.createElement('div');
-                el.className  = 'media-item';
-                el.innerHTML  = isVideo
+                const file     = item.name;
+                const fileIdx  = item.fileIdx;
+                const urlPath  = currentPath ? `${currentPath}/${file}` : file;
+                const url      = `/media/${urlPath}`;
+                const isVideo  = /\.(mp4|webm|mkv)$/i.test(file);
+                const el       = document.createElement('div');
+                el.className   = 'media-item';
+                el.innerHTML   = isVideo
                     ? `<video src="${url}#t=0.1" preload="metadata" muted playsinline></video>
                        <div class="video-badge"><svg viewBox="0 0 16 16" fill="none"><polygon points="5,3 13,8 5,13" fill="white"/></svg></div>`
                     : `<img src="${url}" loading="lazy" alt="${escapeHtml(file)}">`;
-                el.addEventListener('click', () => openLightbox(fileIdx));
-                el.addEventListener('contextmenu', e => {
-                    e.preventDefault(); confirmDelete(currentPath, file, false);
+                const fileKey  = `file:${file}`;
+                const fileMeta = { type: 'file', name: file, path: currentPath };
+                el.addEventListener('click', () => {
+                    if (selectedItems.size > 0) { toggleSelect(el, fileKey, fileMeta); return; }
+                    openLightbox(fileIdx);
                 });
+                el.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    toggleSelect(el, fileKey, fileMeta);
+                });
+                addLongPress(el, () => toggleSelect(el, fileKey, fileMeta));
                 grid.appendChild(el);
             }
         });
@@ -185,16 +239,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderPagination(total, page, totalPages) {
-        const bar = document.getElementById('paginationBar');
-        if (!bar) return;
-        if (totalPages <= 1) { bar.style.display = 'none'; return; }
+        if (totalPages <= 1) {
+            ['paginationBar','paginationBarTop'].forEach(id => {
+                const b = document.getElementById(id);
+                if (b) b.style.display = 'none';
+            });
+            return;
+        }
+        const start    = (page - 1) * PAGE_SIZE + 1;
+        const end      = Math.min(page * PAGE_SIZE, total);
+        const fileOnly = allFiles.length;
 
-        bar.style.display = 'flex';
-
-        const start = (page - 1) * PAGE_SIZE + 1;
-        const end   = Math.min(page * PAGE_SIZE, total);
-
-        // Build compact page number list with ellipsis
         let nums = [];
         if (totalPages <= 7) {
             nums = Array.from({ length: totalPages }, (_, i) => i + 1);
@@ -203,19 +258,29 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (page >= totalPages - 2) {
             nums = [1, '…', totalPages-3, totalPages-2, totalPages-1, totalPages];
         } else {
-            nums = [1, '…', page - 1, page, page + 1, '…', totalPages];
+            nums = [1, '…', page-1, page, page+1, '…', totalPages];
         }
 
-        bar.innerHTML = `
-            <span class="pg-info">Showing <strong>${start}–${end}</strong> of <strong>${total}</strong></span>
+        const html = `
+            <div class="pg-summary">
+                <span class="pg-info">Showing <strong>${start}–${end}</strong> of <strong>${total}</strong></span>
+                <span class="pg-total-badge">${fileOnly} file${fileOnly !== 1 ? 's' : ''}</span>
+            </div>
             <div class="pg-controls">
-                <button class="pg-btn pg-arrow" onclick="goToPage(${page - 1})" ${page === 1 ? 'disabled' : ''} title="Previous">&#10094;</button>
+                <button class="pg-btn pg-arrow" onclick="goToPage(${page-1})" ${page===1?'disabled':''}>&#10094;</button>
                 ${nums.map(n => n === '…'
                     ? `<span class="pg-dots">…</span>`
-                    : `<button class="pg-btn${n === page ? ' pg-active' : ''}" onclick="goToPage(${n})">${n}</button>`
+                    : `<button class="pg-btn${n===page?' pg-active':''}" onclick="goToPage(${n})">${n}</button>`
                 ).join('')}
-                <button class="pg-btn pg-arrow" onclick="goToPage(${page + 1})" ${page === totalPages ? 'disabled' : ''} title="Next">&#10095;</button>
+                <button class="pg-btn pg-arrow" onclick="goToPage(${page+1})" ${page===totalPages?'disabled':''}>&#10095;</button>
             </div>`;
+
+        ['paginationBar','paginationBarTop'].forEach(id => {
+            const b = document.getElementById(id);
+            if (!b) return;
+            b.style.display = 'flex';
+            b.innerHTML = html;
+        });
     }
 
     window.goToPage = function (page) {
