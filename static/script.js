@@ -563,7 +563,62 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     document.getElementById('userModal').addEventListener('click', e => {
         if (e.target === document.getElementById('userModal')) closeUserManager();
+
+    window.openActivityLog = function () {
+        document.getElementById('activityModal').classList.add('active');
+        loadActivityLog();
+    };
+    window.closeActivityLog = function () {
+        document.getElementById('activityModal').classList.remove('active');
+    };
+    document.getElementById('activityModal').addEventListener('click', e => {
+        if (e.target === document.getElementById('activityModal')) closeActivityLog();
     });
+
+    function loadActivityLog() {
+        const list = document.getElementById('actList');
+        list.innerHTML = '<div class="act-empty">Loading…</div>';
+        fetch('/api/activity').then(r => r.json()).then(data => {
+            const entries = data.activity || [];
+            document.getElementById('actCount').textContent =
+                entries.length ? `${entries.length} events` : '';
+            if (!entries.length) {
+                list.innerHTML = '<div class="act-empty">No activity recorded yet</div>';
+                return;
+            }
+            const badgeClass = { login: 'act-badge-login', gallery: 'act-badge-gallery', upload: 'act-badge-upload' };
+            list.innerHTML = entries.map(e => `
+                <div class="act-row">
+                    <div class="act-avatar">${escapeHtml(e.user[0].toUpperCase())}</div>
+                    <div class="act-body">
+                        <div class="act-top">
+                            <span class="act-username">${escapeHtml(e.user)}</span>
+                            <span class="act-badge ${badgeClass[e.action] || 'act-badge-gallery'}">${escapeHtml(e.action)}</span>
+                        </div>
+                        <div class="act-bottom">
+                            <span class="act-detail">
+                                <svg viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="5" stroke="currentColor" stroke-width="1.2"/><path d="M4 6h4M6 4v4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+                                ${escapeHtml(e.ip)}
+                            </span>
+                            <span class="act-detail">
+                                <svg viewBox="0 0 12 12" fill="none"><rect x="1.5" y="1.5" width="9" height="7" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M4 10.5h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+                                ${escapeHtml(e.device)}
+                            </span>
+                            <span class="act-time">${escapeHtml(e.ts)}</span>
+                        </div>
+                    </div>
+                </div>`).join('');
+        });
+    }
+
+    window.clearActivityLog = async function () {
+        if (!confirm('Clear all activity logs?')) return;
+        await fetch('/api/activity', { method: 'DELETE' });
+        loadActivityLog();
+    };
+    });
+
+
 
 function loadUserList() {
         Promise.all([
