@@ -2,5 +2,9 @@ media/
 venv/
 users.json
 __pycache__/
+<<<<<<< HEAD
 restrictions.json
 activity.json
+=======
+activity_log.json
+>>>>>>> 1b60a78 (Added activity_log)
