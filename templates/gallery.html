@@ -48,6 +48,13 @@
         <div class="sidebar-admin">
             <div class="tree-section-label">Admin</div>
             <button class="sidebar-nav-btn" onclick="openUserManager()">
+                <button class="sidebar-nav-btn" onclick="openActivityLog()">
+                    <svg viewBox="0 0 20 20" fill="none" width="16" height="16">
+                        <circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.4"/>
+                        <path d="M10 6v4l2.5 2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                    </svg>
+                    Activity Log
+                </button>
                 <svg viewBox="0 0 20 20" fill="none" width="16" height="16"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M4 17c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
                 Manage Users
             </button>
@@ -185,6 +192,21 @@
                     <h3>Existing Users</h3>
                     <div id="userList" class="user-list"></div>
                 </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-overlay" id="activityModal">
+        <div class="glass-modal" style="max-width:560px">
+            <div class="modal-header">
+                <h2>Activity Log</h2>
+                <button onclick="closeActivityLog()" class="modal-close">✕</button>
+            </div>
+            <div class="act-modal-body">
+                <div class="act-toolbar">
+                    <span class="act-count" id="actCount"></span>
+                    <button class="act-clear-btn" onclick="clearActivityLog()">Clear all</button>
+                </div>
+                <div class="act-list" id="actList"></div>
             </div>
         </div>
     </div>

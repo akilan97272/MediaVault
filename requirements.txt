@@ -7,3 +7,4 @@ itsdangerous
 passlib[bcrypt]
 aiofiles
 bcrypt<4.0
+cryptography

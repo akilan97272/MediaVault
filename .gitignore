@@ -2,3 +2,5 @@ media/
 venv/
 users.json
 __pycache__/
+restrictions.json
+activity.json
