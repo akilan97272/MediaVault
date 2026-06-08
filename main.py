@@ -15,8 +15,6 @@ from passlib.context import CryptContext
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from dotenv import load_dotenv
 from datetime import datetime
-import hashlib, base64
-from cryptography.fernet import Fernet
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -26,6 +24,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", "change-this-unsafe-default-key")
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 MEDIA_DIR  = os.path.join(BASE_DIR, "media")
 USERS_FILE = os.path.join(BASE_DIR, "users.json")
+ACTIVITY_LOG_FILE = os.path.join(BASE_DIR, "activity_log.json")
 SHARED_DIR = os.path.join(MEDIA_DIR, "shared")
 
 # Computed ONCE at startup — reused on every path-traversal check
@@ -117,70 +116,6 @@ def _ensure_user_folder(username: str) -> None:
     if username != "admin":
         os.makedirs(os.path.join(MEDIA_DIR, username), exist_ok=True)
 
-ACTIVITY_FILE = os.path.join(BASE_DIR, "activity.json")
-_act_lock     = threading.Lock()
-_MAX_ENTRIES  = 500
-
-def _fernet() -> Fernet:
-    key = base64.urlsafe_b64encode(hashlib.sha256(SECRET_KEY.encode()).digest())
-    return Fernet(key)
-
-def _parse_ua(ua: str) -> str:
-    if not ua: return "Unknown"
-    for needle, label in (
-        ("iPhone","iPhone"),("iPad","iPad"),("Android",None),
-        ("Windows","Windows"),("Macintosh","Mac"),("Linux","Linux"),
-    ):
-        if needle in ua:
-            if needle == "Android":
-                m = re.search(r'Android [\d.]+', ua)
-                return m.group(0) if m else "Android"
-            return label
-    return "Browser"
-
-def _client_ip(request: Request) -> str:
-    xff = request.headers.get("X-Forwarded-For", "")
-    return xff.split(",")[0].strip() if xff else (request.client.host if request.client else "—")
-
-def log_activity(username: str, ip: str, ua: str, action: str) -> None:
-    token = _fernet().encrypt(json.dumps({
-        "ts":     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "user":   username,
-        "ip":     ip,
-        "device": _parse_ua(ua),
-        "action": action,
-    }, separators=(',',':')).encode()).decode()
-    with _act_lock:
-        existing = []
-        if os.path.exists(ACTIVITY_FILE):
-            try:
-                with open(ACTIVITY_FILE) as f:
-                    existing = json.load(f)
-            except Exception:
-                pass
-        existing.append(token)
-        if len(existing) > _MAX_ENTRIES:
-            existing = existing[-_MAX_ENTRIES:]
-        tmp = ACTIVITY_FILE + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(existing, f, separators=(',',':'))
-        os.replace(tmp, ACTIVITY_FILE)
-
-def load_activity() -> list:
-    if not os.path.exists(ACTIVITY_FILE): return []
-    fo = _fernet()
-    try:
-        with open(ACTIVITY_FILE) as f:
-            tokens = json.load(f)
-    except Exception:
-        return []
-    result = []
-    for token in reversed(tokens):
-        try:
-            result.append(json.loads(fo.decrypt(token.encode()).decode()))
-        except Exception:
-            continue
-    return result
 
 RESTRICTIONS_FILE = os.path.join(BASE_DIR, "restrictions.json")
 _DAY_NAMES        = ("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday")
@@ -218,6 +153,104 @@ def is_allowed_today(username: str) -> bool:
     if not cfg or not cfg.get("enabled", False):
         return True
     return datetime.now().weekday() in cfg.get("allowed_days", [])
+
+
+# ── Activity Log (Login tracking) ─────────────────────────────────────────────
+
+_activity_lock = threading.Lock()
+
+
+def log_login(username: str, user_agent: str, ip_address: str, success: bool = True) -> None:
+    """Log a login attempt with device details."""
+    with _activity_lock:
+        activities = []
+        if os.path.exists(ACTIVITY_LOG_FILE):
+            try:
+                with open(ACTIVITY_LOG_FILE) as f:
+                    activities = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                activities = []
+        
+        # Parse user agent for device info
+        device_info = parse_user_agent(user_agent)
+        
+        activity = {
+            "timestamp": datetime.now().isoformat(),
+            "username": username,
+            "ip_address": ip_address,
+            "user_agent": user_agent,
+            "device_info": device_info,
+            "success": success
+        }
+        
+        activities.insert(0, activity)  # newest first
+        
+        # Keep last 500 login records
+        if len(activities) > 500:
+            activities = activities[:500]
+        
+        tmp = ACTIVITY_LOG_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(activities, f, separators=(',', ':'))
+        os.replace(tmp, ACTIVITY_LOG_FILE)
+
+
+def parse_user_agent(user_agent: str) -> dict:
+    """Parse User-Agent string to extract device info."""
+    ua = user_agent.lower()
+    
+    # Detect OS
+    if "windows" in ua:
+        os_name = "Windows"
+    elif "mac" in ua or "darwin" in ua:
+        os_name = "macOS"
+    elif "linux" in ua:
+        os_name = "Linux"
+    elif "android" in ua:
+        os_name = "Android"
+    elif "iphone" in ua or "ipad" in ua:
+        os_name = "iOS"
+    else:
+        os_name = "Unknown"
+    
+    # Detect Browser
+    if "chrome" in ua and "edg" not in ua:
+        browser = "Chrome"
+    elif "safari" in ua and "chrome" not in ua:
+        browser = "Safari"
+    elif "firefox" in ua:
+        browser = "Firefox"
+    elif "edg" in ua:
+        browser = "Edge"
+    elif "opera" in ua or "opr" in ua:
+        browser = "Opera"
+    else:
+        browser = "Unknown"
+    
+    # Detect Device Type
+    if "mobile" in ua or "android" in ua or "iphone" in ua:
+        device_type = "Mobile"
+    elif "tablet" in ua or "ipad" in ua:
+        device_type = "Tablet"
+    else:
+        device_type = "Desktop"
+    
+    return {
+        "browser": browser,
+        "os": os_name,
+        "device_type": device_type
+    }
+
+
+def get_activity_log() -> list:
+    """Retrieve the activity log."""
+    if os.path.exists(ACTIVITY_LOG_FILE):
+        try:
+            with open(ACTIVITY_LOG_FILE) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return []
+    return []
 
 _jinja_env = Environment(
     loader=FileSystemLoader(os.path.join(BASE_DIR, "templates")),
@@ -266,21 +299,9 @@ app = FastAPI(
     openapi_url=None,
 )
 
-# app.mount("/media",  StaticFiles(directory=MEDIA_DIR), name="media")
+app.mount("/media",  StaticFiles(directory=MEDIA_DIR), name="media")
 app.mount("/static", StaticFiles(directory="static"),  name="static")
 
-@app.get("/media/{file_path:path}")
-def serve_media(file_path: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401)
-    if not can_access_path(user, file_path):
-        raise HTTPException(status_code=403)
-    full = secure_path(file_path)
-    if not os.path.isfile(full):
-        raise HTTPException(status_code=404)
-    from fastapi.responses import FileResponse
-    return FileResponse(full)
 
 # ── Exception handler ─────────────────────────────────────────────────────────
 
@@ -357,15 +378,24 @@ def login_page(request: Request):
 def login(request: Request, username: str = Form(...), password: str = Form(...)):
     users = load_users()
     h = users.get(username)
+    
+    # Get client IP
+    client_ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent", "unknown")
+    
     if h and pwd_context.verify(password, h):
         if not is_allowed_today(username):
+            log_login(username, user_agent, client_ip, success=False)
             day = _DAY_NAMES[datetime.now().weekday()]
             return RedirectResponse(f"/?error=day&day={day}", status_code=302)
-        log_activity(username, _client_ip(request), request.headers.get("User-Agent",""), "login")
+        
+        log_login(username, user_agent, client_ip, success=True)
         r = RedirectResponse("/gallery", status_code=302)
         r.set_cookie("session", signer.sign(username).decode(),
                      httponly=True, samesite="lax", secure=False)
         return r
+    
+    log_login(username, user_agent, client_ip, success=False)
     return RedirectResponse("/?error=cred", status_code=302)
 
 @app.post("/api/register")
@@ -401,7 +431,6 @@ def gallery_page(request: Request):
         r   = RedirectResponse(f"/?error=day&day={day}", status_code=302)
         r.headers.update(_NO_CACHE)
         return r
-    log_activity(user, _client_ip(request), request.headers.get("User-Agent",""), "gallery")
     r = render(request, "gallery.html", {"user": user, "is_admin": user == "admin"})
     r.headers.update(_NO_CACHE)
     return r
@@ -458,6 +487,15 @@ def delete_user(username: str, request: Request):
     save_users(new)
     return {"status": "deleted"}
 
+# ── Activity Log API (admin only) ─────────────────────────────────────────────
+
+@app.get("/api/activity-log")
+def get_activity_log_endpoint(request: Request):
+    if get_current_user(request) != "admin":
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    activities = get_activity_log()
+    return {"activities": activities}
+
 # ── Restriction API (admin only) ──────────────────────────────────────────────
 
 @app.get("/api/restrictions")
@@ -495,20 +533,6 @@ def delete_restriction(username: str, request: Request):
     save_restrictions(r)
     return {"status": "removed"}
 
-@app.get("/api/activity")
-def get_activity(request: Request):
-    if get_current_user(request) != "admin":
-        return JSONResponse(status_code=403, content={"error": "Forbidden"})
-    return {"activity": load_activity()}
-
-@app.delete("/api/activity")
-def clear_activity(request: Request):
-    if get_current_user(request) != "admin":
-        return JSONResponse(status_code=403, content={"error": "Forbidden"})
-    with _act_lock:
-        if os.path.exists(ACTIVITY_FILE):
-            os.remove(ACTIVITY_FILE)
-    return {"status": "cleared"}
 
 # ── Media API ─────────────────────────────────────────────────────────────────
 

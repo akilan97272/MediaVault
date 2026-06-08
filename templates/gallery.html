@@ -48,15 +48,12 @@
         <div class="sidebar-admin">
             <div class="tree-section-label">Admin</div>
             <button class="sidebar-nav-btn" onclick="openUserManager()">
-                <button class="sidebar-nav-btn" onclick="openActivityLog()">
-                    <svg viewBox="0 0 20 20" fill="none" width="16" height="16">
-                        <circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.4"/>
-                        <path d="M10 6v4l2.5 2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-                    </svg>
-                    Activity Log
-                </button>
                 <svg viewBox="0 0 20 20" fill="none" width="16" height="16"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M4 17c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
                 Manage Users
+            </button>
+            <button class="sidebar-nav-btn" onclick="openActivityLog()">
+                <svg viewBox="0 0 20 20" fill="none" width="16" height="16"><path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V4z" stroke="currentColor" stroke-width="1.4"/><path d="M7 8h6M7 12h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+                Activity Log
             </button>
         </div>
         {% endif %}
@@ -195,18 +192,21 @@
             </div>
         </div>
     </div>
+
+    <!-- ===== ACTIVITY LOG MODAL ===== -->
     <div class="modal-overlay" id="activityModal">
-        <div class="glass-modal" style="max-width:560px">
+        <div class="glass-modal">
             <div class="modal-header">
-                <h2>Activity Log</h2>
+                <h2>Login Activity Log</h2>
                 <button onclick="closeActivityLog()" class="modal-close">✕</button>
             </div>
-            <div class="act-modal-body">
-                <div class="act-toolbar">
-                    <span class="act-count" id="actCount"></span>
-                    <button class="act-clear-btn" onclick="clearActivityLog()">Clear all</button>
+            <div class="modal-body">
+                <div class="activity-filters">
+                    <p style="font-size:0.82rem;color:var(--text-2);margin-bottom:8px;">Device Connection History</p>
                 </div>
-                <div class="act-list" id="actList"></div>
+                <div id="activityList" class="activity-list">
+                    <div class="empty-activity">Loading activity log...</div>
+                </div>
             </div>
         </div>
     </div>
