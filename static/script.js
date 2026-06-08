@@ -563,62 +563,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     document.getElementById('userModal').addEventListener('click', e => {
         if (e.target === document.getElementById('userModal')) closeUserManager();
-
-    window.openActivityLog = function () {
-        document.getElementById('activityModal').classList.add('active');
-        loadActivityLog();
-    };
-    window.closeActivityLog = function () {
-        document.getElementById('activityModal').classList.remove('active');
-    };
-    document.getElementById('activityModal').addEventListener('click', e => {
-        if (e.target === document.getElementById('activityModal')) closeActivityLog();
     });
-
-    function loadActivityLog() {
-        const list = document.getElementById('actList');
-        list.innerHTML = '<div class="act-empty">Loading…</div>';
-        fetch('/api/activity').then(r => r.json()).then(data => {
-            const entries = data.activity || [];
-            document.getElementById('actCount').textContent =
-                entries.length ? `${entries.length} events` : '';
-            if (!entries.length) {
-                list.innerHTML = '<div class="act-empty">No activity recorded yet</div>';
-                return;
-            }
-            const badgeClass = { login: 'act-badge-login', gallery: 'act-badge-gallery', upload: 'act-badge-upload' };
-            list.innerHTML = entries.map(e => `
-                <div class="act-row">
-                    <div class="act-avatar">${escapeHtml(e.user[0].toUpperCase())}</div>
-                    <div class="act-body">
-                        <div class="act-top">
-                            <span class="act-username">${escapeHtml(e.user)}</span>
-                            <span class="act-badge ${badgeClass[e.action] || 'act-badge-gallery'}">${escapeHtml(e.action)}</span>
-                        </div>
-                        <div class="act-bottom">
-                            <span class="act-detail">
-                                <svg viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="5" stroke="currentColor" stroke-width="1.2"/><path d="M4 6h4M6 4v4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-                                ${escapeHtml(e.ip)}
-                            </span>
-                            <span class="act-detail">
-                                <svg viewBox="0 0 12 12" fill="none"><rect x="1.5" y="1.5" width="9" height="7" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M4 10.5h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-                                ${escapeHtml(e.device)}
-                            </span>
-                            <span class="act-time">${escapeHtml(e.ts)}</span>
-                        </div>
-                    </div>
-                </div>`).join('');
-        });
-    }
-
-    window.clearActivityLog = async function () {
-        if (!confirm('Clear all activity logs?')) return;
-        await fetch('/api/activity', { method: 'DELETE' });
-        loadActivityLog();
-    };
-    });
-
-
 
 function loadUserList() {
         Promise.all([
@@ -742,6 +687,78 @@ function loadUserList() {
         el.textContent = text;
         el.className   = `form-msg ${type}`;
         setTimeout(() => { el.textContent = ''; el.className = 'form-msg'; }, 3500);
+    }
+
+    // =====================
+    // ACTIVITY LOG
+    // =====================
+    window.openActivityLog = function () {
+        if (!window.IS_ADMIN) return;
+        document.getElementById('activityModal').classList.add('active');
+        loadActivityLog();
+    };
+
+    window.closeActivityLog = function () {
+        document.getElementById('activityModal').classList.remove('active');
+    };
+
+    document.getElementById('activityModal').addEventListener('click', e => {
+        if (e.target === document.getElementById('activityModal')) closeActivityLog();
+    });
+
+    async function loadActivityLog() {
+        try {
+            const res = await fetch('/api/activity-log');
+            if (!res.ok) return;
+            const data = await res.json();
+            displayActivityLog(data.activities || []);
+        } catch (err) {
+            console.error('Failed to load activity log:', err);
+        }
+    }
+
+    window.filterActivityLog = function () {
+        const filterValue = document.getElementById('activityFilter').value;
+        // Reload and filter will happen on next load
+        loadActivityLog();
+    };
+
+    function displayActivityLog(activities) {
+        const list = document.getElementById('activityList');
+        if (!list) return;
+
+        if (activities.length === 0) {
+            list.innerHTML = '<div class="empty-activity">No login activity recorded yet</div>';
+            return;
+        }
+
+        list.innerHTML = activities.map(a => {
+            const date = new Date(a.timestamp);
+            const timeStr = date.toLocaleTimeString();
+            const dateStr = date.toLocaleDateString();
+            const device = a.device_info || {};
+            const statusClass = a.success ? 'success' : 'failed';
+            const statusText = a.success ? 'Success' : 'Failed';
+            
+            return `
+                <div class="activity-item">
+                    <div style="display:flex;justify-content:space-between;align-items:start;">
+                        <div>
+                            <span class="activity-user">${escapeHtml(a.username)}</span>
+                            <span class="activity-action ${statusClass}"> — ${statusText}</span>
+                        </div>
+                        <span style="font-size:0.7rem;color:var(--text-3);">${statusClass === 'success' ? '✓' : '✗'}</span>
+                    </div>
+                    <div class="activity-time">${dateStr} ${timeStr}</div>
+                    <div style="margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.75rem;color:var(--text-3);">
+                        <div><strong>Device:</strong> ${escapeHtml(device.device_type || 'Unknown')}</div>
+                        <div><strong>OS:</strong> ${escapeHtml(device.os || 'Unknown')}</div>
+                        <div><strong>Browser:</strong> ${escapeHtml(device.browser || 'Unknown')}</div>
+                        <div><strong>IP:</strong> ${escapeHtml(a.ip_address || 'Unknown')}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
     }
 
     function escapeHtml(s) {
