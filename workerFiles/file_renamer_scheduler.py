@@ -4,7 +4,7 @@ from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
-from file_renamer import process_all_users, print_results
+from workerFiles.file_renamer import process_all_users, print_results
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)

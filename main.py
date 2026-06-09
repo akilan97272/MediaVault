@@ -428,6 +428,92 @@ async def register(username: str = Form(...), password: str = Form(...)):
     _ensure_user_folder(username)
     return {"status": "created", "username": username}
 
+# ── Admin helpers ─────────────────────────────────────────────────────────────
+
+def _count_dir(path: str) -> tuple[int, int]:
+    count = size = 0
+    try:
+        with os.scandir(path) as it:
+            for e in it:
+                if e.is_file(follow_symlinks=False):
+                    if e.name.lower().endswith(_ALLOWED_EXT):
+                        count += 1
+                        size  += e.stat().st_size
+                elif e.is_dir(follow_symlinks=False):
+                    c, s  = _count_dir(e.path)
+                    count += c; size += s
+    except OSError:
+        pass
+    return count, size
+
+
+def _recent_files(n: int) -> list[str]:
+    found: list[tuple[float, str]] = []
+    def _walk(directory: str, rel: str) -> None:
+        try:
+            with os.scandir(directory) as it:
+                for e in it:
+                    if e.is_file(follow_symlinks=False) and e.name.lower().endswith(_ALLOWED_EXT):
+                        r = f"{rel}/{e.name}" if rel else e.name
+                        found.append((e.stat().st_mtime, r))
+                    elif e.is_dir(follow_symlinks=False):
+                        nr = f"{rel}/{e.name}" if rel else e.name
+                        _walk(e.path, nr)
+        except OSError:
+            pass
+    _walk(MEDIA_DIR, "")
+    found.sort(reverse=True)
+    return [f[1] for f in found[:n]]
+
+
+# ── Admin routes ──────────────────────────────────────────────────────────────
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page(request: Request):
+    if get_current_user(request) != "admin":
+        r = render(request, "404.html", status=404)
+        r.headers.update(_NO_CACHE)
+        return r
+    r = render(request, "admin.html", {"user": "admin", "is_admin": True})
+    r.headers.update(_NO_CACHE)
+    return r
+
+
+@app.get("/api/admin/stats")
+def admin_stats(request: Request):
+    if get_current_user(request) != "admin":
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+
+    users    = load_users()
+    activity = load_activity()
+    today    = datetime.now().strftime("%Y-%m-%d")
+
+    active_today = len({e["user"] for e in activity if e.get("ts","").startswith(today)})
+
+    user_stats: dict[str, dict] = {}
+    total_files = total_size = 0
+
+    try:
+        with os.scandir(MEDIA_DIR) as it:
+            for entry in it:
+                if entry.is_dir(follow_symlinks=False):
+                    c, s = _count_dir(entry.path)
+                    user_stats[entry.name] = {"files": c, "size": s}
+                    total_files += c
+                    total_size  += s
+    except OSError:
+        pass
+
+    return {
+        "total_users":     len(users),
+        "active_today":    active_today,
+        "total_files":     total_files,
+        "total_size":      total_size,
+        "user_stats":      user_stats,
+        "recent_activity": activity[:15],
+        "recent_files":    _recent_files(24),
+    }
+
 
 @app.get("/gallery", response_class=HTMLResponse)
 def gallery_page(request: Request):
