@@ -8,13 +8,11 @@ A self-hosted private media gallery with per-user folders and shared space.
 
 - **Private galleries** — each user sees only their own folder and the shared folder
 - **Shared folder** — visible to all users; upload anything others can browse
-- **Admin view** — admin account can browse every user's folder
+
 - **Self-registration** — new users can create an account from the login screen; their personal folder is created automatically
 - **Admin user management** — create or remove users from the gallery panel
 - **Folder tree** — nested folders with sidebar navigation
 - **Lightbox** — full-screen image/video viewer with pinch-to-zoom, drag-to-pan, keyboard navigation
-- **Slideshow** — auto-advance with 10 / 15 / 20 / 30 second intervals and a live countdown ring
-- **Dark & Light mode** — liquid glass theme in both, preference saved to localStorage
 - **Multi-file upload** — select multiple files at once; progress indicator on the upload button
 - **Right-click to delete** — right-click any file or folder in the grid to remove it
 
@@ -24,17 +22,31 @@ A self-hosted private media gallery with per-user folders and shared space.
 
 ```
 gallery_app/
-├── main.py              # FastAPI backend
-├── users.json           # Hashed user credentials (auto-created on first run)
+├── main.py
+├── users.json
+├── activity_log.json
+├── restrictions.json
+├── requirements.txt
+├── .gitignore
+├── README.md
+│
 ├── media/
-│   ├── shared/          # Visible to all users
-│   └── <username>/      # Per-user private folder
+│   ├── shared/
+│   └── <username>/
+│
 ├── static/
 │   ├── style.css
 │   └── script.js
-└── templates/
-    ├── login.html
-    └── gallery.html
+│
+├── templates/
+│   ├── login.html
+│   ├── gallery.html
+│   ├── admin.html
+│   └── 404.html
+│
+└── workerFiles/
+    ├── file_renamer.py
+    └── file_renamer_scheduler.py
 ```
 
 ---
@@ -44,9 +56,10 @@ gallery_app/
 ### 1. Install dependencies
 
 ```bash
+cd MediaVault
 python -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
-pip install fastapi uvicorn[standard] passlib[bcrypt] python-multipart itsdangerous python-dotenv jinja2
+pip install -r requirements.txt
 ```
 
 ### 2. Configure (optional)
@@ -61,6 +74,7 @@ SECRET_KEY=replace-with-a-long-random-string
 
 ```bash
 uvicorn main:app --reload
+uvicorn main:app --host 0.0.0.0 --port 8000 #for network visibility
 ```
 
 Open [http://localhost:8000](http://localhost:8000)
@@ -74,17 +88,6 @@ Open [http://localhost:8000](http://localhost:8000)
 | `admin`  | `admin123` |
 
 > Change the admin password via the **Manage Users** panel after first login.
-
----
-
-## Access Control
-
-| Who      | Can see                          |
-|----------|----------------------------------|
-| Any user | `shared/` + their own folder     |
-| Admin    | All folders for all users        |
-
-Users cannot access each other's private folders — the API enforces this server-side regardless of what path is requested.
 
 ---
 

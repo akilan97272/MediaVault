@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let   allFolders  = [];  
     let   allFiles    = [];
     const selectedItems = new Map();
+    let _treeLoaded = false;
 
     // ---- Zoom State ----
     let scale = 1, pointX = 0, pointY = 0;
@@ -34,7 +35,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // INIT
     // =====================
     loadMedia('');
-    loadFolderTree();
 
     function redirectIfRestricted(response) {
         if (response.status === 401) {
@@ -88,7 +88,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (loadingState) loadingState.style.display = 'none';
                 allFolders = data.folders || [];
                 allFiles   = data.files   || [];
-                mediaFiles = allFiles;          // lightbox always sees full list
+                mediaFiles = allFiles;
+                if (!_treeLoaded) { loadFolderTree(); _treeLoaded = true; }
                 renderPage();
             })
             .catch(() => { if (loadingState) loadingState.style.display = 'none'; });
@@ -141,6 +142,7 @@ document.addEventListener('DOMContentLoaded', () => {
             fetch(`/api/media?${new URLSearchParams({ path: m.path, filename: m.name })}`, { method: 'DELETE' })
         ));
         clearSelection();
+        _treeLoaded = false;
         loadMedia(currentPath);
         loadFolderTree();
     };
@@ -197,7 +199,7 @@ slice.forEach(item => {
                         return;
                     }
                     loadMedia(currentPath ? `${currentPath}/${name}` : name);
-                    loadFolderTree();
+                    
                 });
                 if (!isShared) {
                     el.addEventListener('contextmenu', e => {
@@ -353,7 +355,7 @@ slice.forEach(item => {
         fd.append('name', name.trim());
         fd.append('path', currentPath);
         const res = await fetch('/api/folder', { method: 'POST', body: fd });
-        if (res.ok) { loadMedia(currentPath); loadFolderTree(); }
+        if (res.ok) { _treeLoaded = false; loadMedia(currentPath); loadFolderTree(); }
         else { const d = await res.json(); alert('Error: ' + (d.detail || 'Could not create folder')); }
     };
 
@@ -384,7 +386,7 @@ slice.forEach(item => {
         if (!confirm(`Delete ${isFolder ? 'folder' : 'file'} "${name}"?`)) return;
         const params = new URLSearchParams({ path, filename: name });
         fetch(`/api/media?${params}`, { method: 'DELETE' })
-            .then(r => { if (r.ok) { loadMedia(currentPath); loadFolderTree(); } })
+            .then(r => { if (r.ok) { _treeLoaded = false; loadMedia(currentPath); loadFolderTree(); } })
             .catch(console.error);
     }
 

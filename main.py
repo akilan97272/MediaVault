@@ -262,6 +262,19 @@ _jinja_env = Environment(
 )
 _tpl_store: dict = {}
 
+def load_activity() -> list:
+    result = []
+    for e in get_activity_log():
+        di  = e.get("device_info") or {}
+        raw = e.get("timestamp", "")
+        result.append({
+            "ts":     raw[:10] + " " + raw[11:19] if len(raw) >= 19 else raw,
+            "user":   e.get("username", ""),
+            "ip":     e.get("ip_address", "—"),
+            "device": f"{di.get('browser','?')} · {di.get('os','?')} · {di.get('device_type','?')}",
+            "action": "login" if e.get("success", True) else "failed",
+        })
+    return result
 
 def _tpl(name: str):
     """Compiled Jinja2 Template — disk is only read on the first call."""
@@ -401,7 +414,7 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
             return RedirectResponse(f"/?error=day&day={day}", status_code=302)
         
         log_login(username, user_agent, client_ip, success=True)
-        r = RedirectResponse("/gallery", status_code=302)
+        r = RedirectResponse("/admin" if username == "admin" else "/gallery", status_code=302)
         r.set_cookie("session", signer.sign(username).decode(),
                      httponly=True, samesite="lax", secure=False)
         return r
