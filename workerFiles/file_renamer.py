@@ -190,15 +190,6 @@ def rename_files_in_folder(folder_path: str, folder_name: str, dry_run: bool = F
 
 
 def process_all_users(dry_run: bool = False) -> dict:
-    """
-    Process all user folders in MEDIA_DIR.
-    
-    Args:
-        dry_run: If True, only print what would be done
-    
-    Returns:
-        dict with results for each folder
-    """
     results = {
         "timestamp": datetime.now().isoformat(),
         "dry_run": dry_run,
@@ -208,33 +199,34 @@ def process_all_users(dry_run: bool = False) -> dict:
         "total_skipped": 0,
         "total_errors": 0
     }
-    
     if not os.path.isdir(MEDIA_DIR):
         results["error"] = f"Media directory not found: {MEDIA_DIR}"
         return results
-    
-    # Iterate through user folders
-    for item in os.listdir(MEDIA_DIR):
-        item_path = os.path.join(MEDIA_DIR, item)
-        
-        # Skip if not a directory
-        if not os.path.isdir(item_path):
+    # Process every user folder
+    for user in os.listdir(MEDIA_DIR):
+        user_path = os.path.join(MEDIA_DIR, user)
+        if not os.path.isdir(user_path):
             continue
-        
-        # Skip 'shared' folder (process only user folders)
-        if item.lower() == 'shared':
+        if user.lower() == "shared":
             continue
-        
-        # Process the user folder
-        folder_results = rename_files_in_folder(item_path, item, dry_run=dry_run)
-        results["folders"][item] = folder_results
-        
-        results["total_renamed"] += len(folder_results["renamed"])
-        results["total_converted"] += len(folder_results["converted"])
-        results["total_skipped"] += len(folder_results["skipped"])
-        results["total_errors"] += len(folder_results["errors"])
-    
+        # Walk through ALL nested folders
+        for root, dirs, files in os.walk(user_path):
+            folder_name = os.path.basename(root)
+            folder_results = rename_files_in_folder(
+                root,
+                folder_name,
+                dry_run=dry_run
+            )
+            relative_path = os.path.relpath(root, MEDIA_DIR)
+            results["folders"][relative_path] = folder_results
+            results["total_renamed"] += len(folder_results["renamed"])
+            results["total_converted"] += len(folder_results["converted"])
+            results["total_skipped"] += len(folder_results["skipped"])
+            results["total_errors"] += len(folder_results["errors"])
+
     return results
+
+
 
 
 def print_results(results: dict) -> None:
