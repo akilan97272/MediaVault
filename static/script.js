@@ -2,6 +2,54 @@
    MediaVault — script.js
    ========================================================= */
 
+let uploadInProgress=false;
+
+window.addEventListener('beforeunload',(e)=>{
+    if(!uploadInProgress) return;
+    e.preventDefault();
+    e.returnValue='';
+});
+
+function showUploadOverlay(files){
+    const overlay = document.getElementById('uploadOverlay');
+    const list = document.getElementById('uploadFileList');
+    list.innerHTML='';
+    files.forEach(file=>{
+        list.innerHTML += `
+        <div class="upload-file-row" id="row-${file.name}">
+            <span>${file.name}</span>
+            <span class="upload-file-status">Waiting...</span>
+        </div>`;
+    });
+    overlay.classList.add('active');
+    document.body.style.overflow='hidden';
+}
+
+function hideUploadOverlay(){
+    document.getElementById('uploadOverlay')
+        .classList.remove('active');
+    document.body.style.overflow='';
+}
+
+function updateUploadProgress(percent){
+    document.getElementById('uploadProgressBar')
+        .style.width = percent + '%';
+    document.getElementById('uploadProgressText')
+        .textContent = Math.round(percent) + '%';
+}
+
+function updateFileStatus(name,status){
+    const row = document.querySelector(
+      `#row-${CSS.escape(name)} .upload-file-status`
+    );
+    if(!row) return;
+    row.textContent=status;
+    if(status==="Finished")
+        row.classList.add('done');
+    if(status==="Failed")
+        row.classList.add('failed');
+}
+
 document.addEventListener('DOMContentLoaded', () => {
 
     // ---- DOM refs ----
@@ -171,7 +219,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const slice = combined.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
-slice.forEach(item => {
+    slice.forEach(item => {
             if (item.kind === 'folder') {
                 const name     = item.name;
                 const isShared = name === 'shared' && !currentPath;
@@ -333,7 +381,10 @@ slice.forEach(item => {
         }).join('');
     }
 
-    window.navigateTo = function (path) { loadMedia(path); };
+    window.navigateTo = function (path) {
+        loadMedia(path);
+        if (window.innerWidth < 900) closeSidebar();
+    };
 
     // =====================
     // GO UP
@@ -365,18 +416,83 @@ slice.forEach(item => {
     fileInput.addEventListener('change', async e => {
         const files = Array.from(e.target.files);
         if (!files.length) return;
+        uploadInProgress = true;
+        showUploadOverlay(files);
         const fab = document.querySelector('.fab-primary');
-        if (fab) fab.classList.add('uploading');
-        for (const file of files) {
-            const fd = new FormData();
-            fd.append('file', file);
-            fd.append('path', currentPath);
-            try { await fetch('/api/upload', { method: 'POST', body: fd }); }
-            catch (err) { console.error(err); }
+        if (fab)
+            fab.classList.add('uploading');
+        let completed = 0;
+       for (const file of files) {
+        document.getElementById('uploadCurrentFile')
+            .textContent =
+            `Uploading ${completed + 1}/${files.length} • ${file.name}`;
+        updateFileStatus(file.name, "Uploading");
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('path', currentPath);
+        const start = Date.now();
+        try {
+                await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', '/api/upload');
+                    xhr.upload.onprogress = (e) => {
+                        if (!e.lengthComputable) return;
+                        const percent =
+                            ((completed + (e.loaded / e.total))
+                                / files.length) * 100;
+                        updateUploadProgress(percent);
+                        const speed =
+                            e.loaded /
+                            ((Date.now() - start) / 1000);
+                        if (speed > 0) {
+                            const remain =
+                                (e.total - e.loaded) / speed;
+                            document.getElementById('uploadEta')
+                                .textContent =
+                                `ETA: ${Math.ceil(remain)} sec`;
+                        }
+                    };
+                    xhr.onload = () => {
+                        if (xhr.status >= 200 &&
+                            xhr.status < 300) {
+                            updateFileStatus(
+                                file.name,
+                                "Finished"
+                            );
+                            completed++;
+                            resolve();
+                        } else {
+                            updateFileStatus(
+                                file.name,
+                                "Failed"
+                            );
+                            reject();
+                        }
+                    };
+                    xhr.onerror = () => {
+                        updateFileStatus(
+                            file.name,
+                            "Failed"
+                        );
+                        reject();
+                    };
+                    xhr.send(fd);
+                });
+            } catch (err) {
+                console.error(err);
+            }
         }
-        if (fab) fab.classList.remove('uploading');
-        fileInput.value = '';
-        loadMedia(currentPath);
+        updateUploadProgress(100);
+        document.getElementById('uploadEta')
+            .textContent = "Upload Complete";
+        uploadInProgress = false;
+        if (fab)
+            fab.classList.remove('uploading');
+        setTimeout(() => {
+            hideUploadOverlay();
+            fileInput.value = '';
+            loadMedia(currentPath);
+        }, 1500);
     });
 
     // =====================
@@ -612,11 +728,31 @@ slice.forEach(item => {
     // =====================
     // SIDEBAR
     // =====================
-    window.openSidebar  = () => { document.getElementById('sidebar').classList.add('open'); document.getElementById('sidebarOverlay').classList.add('visible'); };
-    window.closeSidebar = () => { document.getElementById('sidebar').classList.remove('open'); document.getElementById('sidebarOverlay').classList.remove('visible'); };
-    const sidebarClose = document.getElementById('sidebarClose');
-    if (sidebarClose) sidebarClose.addEventListener('click', closeSidebar);
+    const sidebar = document.getElementById("sidebar");
+    const overlay = document.getElementById("sidebarOverlay");
+    const closeBtn = document.getElementById("sidebarClose");
 
+    window.openSidebar = function () {
+        sidebar.classList.add("open");
+        overlay.classList.add("visible");
+        document.body.style.overflow = "hidden";
+    };
+
+    window.closeSidebar = function () {
+        sidebar.classList.remove("open");
+        overlay.classList.remove("visible");
+        document.body.style.overflow = "";
+    };
+
+    if (closeBtn) {
+        closeBtn.addEventListener("click", window.closeSidebar);
+        closeBtn.addEventListener("touchstart", window.closeSidebar, { passive: true });
+    }
+
+    if (overlay) {
+        overlay.addEventListener("click", window.closeSidebar);
+        overlay.addEventListener("touchstart", window.closeSidebar, { passive: true });
+    }
     // =====================
     // USER MANAGER
     // =====================
@@ -632,7 +768,7 @@ slice.forEach(item => {
         if (e.target === document.getElementById('userModal')) closeUserManager();
     });
 
-function loadUserList() {
+    function loadUserList() {
         Promise.all([
             fetch('/api/users').then(r => r.json()),
             fetch('/api/restrictions').then(r => r.json()),
@@ -678,9 +814,9 @@ function loadUserList() {
                                         data-day="${i}">
                                     ${d}
                                 </button>`).join('')}
-                            <button class="save-restrict-btn"
-                                onclick="saveRestriction('${escapeHtml(u)}')">Save</button>
                         </div>
+                        <button class="save-restrict-btn" style="margin-top:10px;align-self:flex-end"
+                            onclick="saveRestriction('${escapeHtml(u)}')">Save</button>
                     </div>
                     ` : ''}
                 </div>`;
