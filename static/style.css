@@ -41,6 +41,10 @@
 
     --icon-sun-display:  block;
     --icon-moon-display: none;
+
+    --neon-blue: #0ff0fc;
+    --neon-pink: #ff3864;
+    --neon-purple: #8f00ff;
 }
 
 /* ──────────────────────────────────────────────
@@ -79,6 +83,10 @@
 
     --icon-sun-display:  none;
     --icon-moon-display: block;
+    
+    --neon-blue: #0ff0fc;
+    --neon-pink: #ff3864;
+    --neon-purple: #8f00ff;
 }
 
 /* ──────────────────────────────────────────────
@@ -506,7 +514,20 @@ body {
 .sidebar-header { display:flex;align-items:center;justify-content:space-between;padding:20px 16px 12px;border-bottom:1px solid var(--glass-border);flex-shrink:0; }
 .sidebar-brand { display:flex;align-items:center;gap:9px;font-family:'Instrument Serif',serif;font-style:italic;font-size:1.15rem;color:var(--text-1); }
 .brand-svg { width:22px;height:22px;color:var(--accent); }
-.sidebar-close { background:none;border:none;color:var(--text-3);font-size:1rem;cursor:pointer;padding:4px 8px;border-radius:8px;transition:color 0.2s; }
+.sidebar-close {
+    background: none;
+    border: none;
+    color: var(--text-3);
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 8px;
+    transition: color 0.2s;
+
+    position: relative;
+    z-index: 9999;
+    pointer-events: auto;
+}
 .sidebar-close:hover { color:var(--text-1); }
 
 .sidebar-nav { flex:1;overflow-y:auto;padding:12px 8px;scrollbar-width:thin;scrollbar-color:rgba(128,128,128,0.2) transparent; }
@@ -865,7 +886,6 @@ body {
 /* Promote glass panels to their own GPU layer so blur is composited once */
 .glass-card,
 .glass-header,
-.sidebar,
 .glass-modal,
 .lightbox,
 .fab-primary,
@@ -899,4 +919,579 @@ body {
 @media (max-width: 600px) {
     :root { --glass-blur: 12px; }
     .sidebar { backdrop-filter: blur(16px) saturate(140%); -webkit-backdrop-filter: blur(16px) saturate(140%); }
+}
+
+.upload-overlay{
+    position:fixed;
+    inset:0;
+    z-index:999999;
+    display:none;
+    align-items:center;
+    justify-content:center;
+    background:rgba(0,0,0,.85);
+    backdrop-filter:blur(25px);
+    pointer-events:all;
+}
+.upload-overlay.active{
+    display:flex;
+}
+.upload-card {
+    width: min(700px, 92vw);
+    max-height: 85vh;
+    padding: 32px;
+    border-radius: 28px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    overflow: hidden;
+    background:
+        linear-gradient(
+            145deg,
+            rgba(15,15,30,.92),
+            rgba(10,10,20,.96)
+        );
+    border: 1px solid rgba(255,255,255,.08);
+    backdrop-filter: blur(25px);
+    box-shadow:
+        0 0 40px rgba(15,240,252,.08),
+        0 0 60px rgba(143,0,255,.08);
+}
+.upload-progress-wrap{
+    height:12px;
+    border-radius:999px;
+    overflow:hidden;
+    background:rgba(255,255,255,.08);
+}
+.upload-progress-bar {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    background:
+        linear-gradient(
+            90deg,
+            var(--neon-pink),
+            var(--neon-blue),
+            var(--neon-purple)
+        );
+    box-shadow:
+        0 0 10px var(--neon-blue),
+        0 0 20px var(--neon-purple);
+    transition: width .2s ease;
+}
+.upload-progress-text{
+    font-size:.9rem;
+    color:var(--text-2);
+}
+.upload-eta{
+    color:var(--accent);
+    font-weight:600;
+}
+.upload-file-list{
+    overflow:auto;
+    max-height:280px;
+    text-align:left;
+}
+.upload-file-row{
+    display:flex;
+    justify-content:space-between;
+    padding:10px 14px;
+    margin-bottom:8px;
+    border-radius:10px;
+    background:rgba(255,255,255,.05);
+}
+.upload-file-status.done{
+    color:#4dd9ac;
+}
+.upload-file-status.failed{
+    color:#ff6b6b;
+}
+.upload-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 999999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,.82);
+    backdrop-filter: blur(18px);
+}
+.upload-overlay.active {
+    display: flex;
+}
+.upload-card h2 {
+    margin: 0;
+    font-size: 1.5rem;
+    color: white;
+    text-shadow:
+        0 0 10px var(--neon-blue),
+        0 0 20px var(--neon-purple);
+}
+.upload-eta {
+    color: var(--neon-blue);
+    font-weight: 600;
+    letter-spacing: .5px;
+}
+.upload-progress-wrap {
+    width: 100%;
+    height: 12px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(255,255,255,.08);
+}
+.upload-progress-bar {
+    width: 0%;
+    height: 100%;
+    border-radius: inherit;
+    background:
+        linear-gradient(
+            90deg,
+            var(--neon-pink),
+            var(--neon-blue),
+            var(--neon-purple)
+        );
+    box-shadow:
+        0 0 10px var(--neon-blue),
+        0 0 20px var(--neon-purple);
+    transition: width .2s ease;
+}
+.upload-progress-text {
+    color: white;
+    font-weight: 600;
+    font-size: .95rem;
+}
+.upload-file-list {
+    width: 100%;
+    max-height: 260px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.upload-file-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: rgba(255,255,255,.05);
+    color: white;
+}
+.upload-file-status.done {
+    color: #4dd9ac;
+    font-weight: 600;
+}
+.upload-file-status.failed {
+    color: #ff6b6b;
+    font-weight: 600;
+}
+@media (max-width:768px){
+    .quantum-spinner{
+        width:90px;
+        height:90px;
+    }
+    .upload-card{
+        width:95vw;
+        padding:24px;
+    }
+    .upload-file-list{
+        max-height:180px;
+    }
+}
+.upload-current-file {
+    color: var(--neon-blue);
+    font-size: 0.95rem;
+    font-weight: 500;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+
+/* Quantum Spinner Animation */
+.quantum-spinner {
+    width: 120px;
+    height: 120px;
+    position: relative;
+    transform-style: preserve-3d;
+    perspective: 800px;
+}
+
+.quantum-container {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    transform-style: preserve-3d;
+    animation: quantum-float 6s ease-in-out infinite;
+}
+
+.quantum-orbits {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    transform-style: preserve-3d;
+    animation: quantum-spin 12s linear infinite;
+}
+
+.quantum-orbit {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    transform-style: preserve-3d;
+}
+
+.quantum-orbit:nth-child(1) {
+    transform: rotateX(60deg) rotateY(0deg);
+}
+
+.quantum-orbit:nth-child(2) {
+    transform: rotateX(60deg) rotateY(120deg);
+}
+
+.quantum-orbit:nth-child(3) {
+    transform: rotateX(60deg) rotateY(240deg);
+}
+
+.quantum-ring {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    border: 3px solid transparent;
+    transform-style: preserve-3d;
+}
+
+.quantum-orbit:nth-child(1) .quantum-ring {
+    border-color: var(--neon-pink);
+    box-shadow: 0 0 15px var(--neon-pink);
+    animation: ring-pulse 3s ease-in-out infinite;
+}
+
+.quantum-orbit:nth-child(2) .quantum-ring {
+    border-color: var(--neon-blue);
+    box-shadow: 0 0 15px var(--neon-blue);
+    animation: ring-pulse 3s ease-in-out infinite;
+    animation-delay: -1s;
+}
+
+.quantum-orbit:nth-child(3) .quantum-ring {
+    border-color: var(--neon-purple);
+    box-shadow: 0 0 15px var(--neon-purple);
+    animation: ring-pulse 3s ease-in-out infinite;
+    animation-delay: -2s;
+}
+
+.quantum-electron {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    transform-style: preserve-3d;
+    animation: electron-orbit 3s linear infinite;
+    top: 50%;
+    left: 50%;
+    filter: blur(0.5px);
+}
+
+.quantum-electron-sphere {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    transform-style: preserve-3d;
+    top: 0;
+    left: 0;
+}
+
+.quantum-electron-face {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    backface-visibility: hidden;
+    transform: translate(-50%, -50%);
+}
+
+.quantum-orbit:nth-child(1) .quantum-electron {
+    animation-timing-function: linear;
+}
+
+.quantum-orbit:nth-child(1) .quantum-electron-face {
+    background: var(--neon-pink);
+    box-shadow: 
+        0 0 4px var(--neon-pink),
+        0 0 8px var(--neon-pink);
+}
+
+.quantum-orbit:nth-child(2) .quantum-electron {
+    animation-direction: reverse;
+}
+
+.quantum-orbit:nth-child(2) .quantum-electron-face {
+    background: var(--neon-blue);
+    box-shadow: 
+        0 0 4px var(--neon-blue),
+        0 0 8px var(--neon-blue);
+}
+
+.quantum-orbit:nth-child(3) .quantum-electron {
+    animation-delay: -1s;
+}
+
+.quantum-orbit:nth-child(3) .quantum-electron-face {
+    background: var(--neon-purple);
+    box-shadow: 
+        0 0 4px var(--neon-purple),
+        0 0 8px var(--neon-purple);
+}
+
+.quantum-core {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background: var(--neon-blue);
+    border-radius: 50%;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 20px var(--neon-blue);
+    animation: core-pulse 2s ease-in-out infinite;
+}
+
+.quantum-core::before,
+.quantum-core::after {
+    content: '';
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: var(--neon-pink);
+    opacity: 0.5;
+    filter: blur(2px);
+    animation: core-glow 3s linear infinite;
+}
+
+.quantum-core::after {
+    background: var(--neon-purple);
+    animation: core-glow 3s linear infinite reverse;
+}
+
+@keyframes quantum-float {
+    0%, 100% {
+        transform: translateY(-2px) rotateX(20deg);
+    }
+    50% {
+        transform: translateY(2px) rotateX(-20deg);
+    }
+}
+
+@keyframes quantum-spin {
+    from {
+        transform: rotateY(0deg) rotateX(0deg);
+    }
+    to {
+        transform: rotateY(360deg) rotateX(360deg);
+    }
+}
+
+@keyframes ring-pulse {
+    0%, 100% {
+        transform: scale(1);
+        opacity: 0.8;
+        border-width: 3px;
+    }
+    50% {
+        transform: scale(0.95);
+        opacity: 0.5;
+        border-width: 4px;
+    }
+}
+
+@keyframes electron-orbit {
+    0% {
+        transform: rotate(0deg) translateX(25px);
+    }
+    100% {
+        transform: rotate(360deg) translateX(25px);
+    }
+}
+
+@keyframes core-pulse {
+    0%, 100% {
+        transform: translate(-50%, -50%) scale(1);
+        box-shadow: 0 0 20px var(--neon-blue);
+    }
+    50% {
+        transform: translate(-50%, -50%) scale(1.3);
+        box-shadow: 0 0 30px var(--neon-blue);
+    }
+}
+
+@keyframes core-glow {
+    0% {
+        transform: scale(1.2) rotate(0deg);
+        opacity: 0.5;
+    }
+    50% {
+        transform: scale(1.8) rotate(180deg);
+        opacity: 0.2;
+    }
+    100% {
+        transform: scale(1.2) rotate(360deg);
+        opacity: 0.5;
+    }
+}
+
+.upload-card {
+
+    width: min(700px, 92vw);
+
+    max-height: 85vh;
+
+    padding: 32px;
+
+    border-radius: 28px;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+
+    overflow: hidden;
+
+    background:
+        linear-gradient(
+            145deg,
+            rgba(15,15,30,.92),
+            rgba(10,10,20,.96)
+        );
+
+    border: 1px solid rgba(255,255,255,.08);
+
+    backdrop-filter: blur(25px);
+
+    box-shadow:
+        0 0 40px rgba(15,240,252,.08),
+        0 0 60px rgba(143,0,255,.08);
+}
+
+.upload-overlay {
+
+    position: fixed;
+    inset: 0;
+
+    z-index: 999999;
+
+    display: none;
+    align-items: center;
+    justify-content: center;
+
+    background: rgba(0,0,0,.82);
+
+    backdrop-filter: blur(18px);
+}
+
+.upload-overlay.active {
+    display: flex;
+}
+
+/* Enhanced hover effects */
+.upload-card:hover .quantum-orbits {
+    animation-duration: 8s;
+}
+
+.upload-card:hover .quantum-ring {
+    animation-duration: 2s;
+}
+
+.upload-card:hover .quantum-electron {
+    animation-duration: 2s;
+}
+
+.upload-card:hover .quantum-core::before,
+.upload-card:hover .quantum-core::after {
+    animation-duration: 2s;
+}
+
+/* Data Stream Animation */
+.data-pulse {
+    position: relative;
+    width: 60px;
+    height: 60px;
+}
+
+.data-wave {
+    position: absolute;
+    width: 100%;
+    height: 2px;
+    background: var(--neon-blue);
+    top: 50%;
+    transform: translateY(-50%);
+    box-shadow: 0 0 10px var(--neon-blue);
+    animation: wave-pulse 2s ease-in-out infinite;
+}
+
+.data-points {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+}
+
+.point {
+    position: absolute;
+    width: 4px;
+    height: 4px;
+    background: var(--neon-pink);
+    border-radius: 50%;
+    box-shadow: 0 0 10px var(--neon-pink);
+}
+
+.point:nth-child(1) {
+    left: 20%;
+    top: 50%;
+    animation: point-move 2s ease-in-out infinite;
+}
+
+.point:nth-child(2) {
+    left: 40%;
+    top: 50%;
+    animation: point-move 2s ease-in-out infinite 0.5s;
+}
+
+.point:nth-child(3) {
+    left: 60%;
+    top: 50%;
+    animation: point-move 2s ease-in-out infinite 1s;
+}
+
+.point:nth-child(4) {
+    left: 80%;
+    top: 50%;
+    animation: point-move 2s ease-in-out infinite 1.5s;
+}
+
+@keyframes wave-pulse {
+    0%, 100% {
+        transform: translateY(-50%) scaleY(1);
+        opacity: 0.5;
+    }
+    50% {
+        transform: translateY(-50%) scaleY(2);
+        opacity: 1;
+    }
+}
+
+@keyframes point-move {
+    0%, 100% {
+        transform: translateY(0);
+        opacity: 1;
+    }
+    50% {
+        transform: translateY(-20px);
+        opacity: 0.5;
+    }
+}
+
+.upload-card:hover .data-wave {
+    animation-duration: 1.5s;
 }
