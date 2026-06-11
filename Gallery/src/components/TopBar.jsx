@@ -1,134 +1,111 @@
 // components/TopBar.jsx
+import { useEffect, useState } from "react";
 import { useTheme } from "../context/ThemeContext";
 
-const SunIcon = () => (
-  <svg className="icon-sun" viewBox="0 0 24 24" fill="none" width="17" height="17">
-    <circle cx="12" cy="12" r="5" stroke="currentColor" strokeWidth="1.6" />
-    <path
-      d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
-      stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"
-    />
-  </svg>
-);
+const HINT_KEY = "mv-theme-hint-seen";
 
-const MoonIcon = () => (
-  <svg className="icon-moon" viewBox="0 0 24 24" fill="none" width="17" height="17">
-    <path
-      d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z"
-      stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"
-    />
-  </svg>
-);
-
-const UserIcon = () => (
-  <svg viewBox="0 0 20 20" fill="none" width="17" height="17">
-    <circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.4" />
-    <path d="M4 17c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-  </svg>
-);
-
-export default function TopBar({
-  breadcrumb = "All Media",
-  onMenuClick,
-  isAdmin = false,
-  onManageUsers,
-  rightSlot,
-}) {
+export default function TopBar() {
   const { toggleTheme } = useTheme();
+  const [showHint, setShowHint] = useState(false);
+
+  useEffect(() => {
+    if (!localStorage.getItem(HINT_KEY)) {
+      const t = setTimeout(() => setShowHint(true), 900);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  function handleCapsuleClick() {
+    toggleTheme();
+    localStorage.setItem(HINT_KEY, "1");
+    setShowHint(false);
+  }
 
   return (
-    <header style={styles.topbar} className="glass-card">
-      {/* Hamburger — mobile only */}
-      <button style={styles.menuBtn} onClick={onMenuClick} aria-label="Open sidebar">
-        <span style={styles.bar} />
-        <span style={styles.bar} />
-        <span style={styles.bar} />
-      </button>
+    <>
+      <style>{`
+        @media (max-width: 767px) {
+          .mv-topbar-mobile {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: fixed;
+            top: 12px;
+            left: 0;
+            right: 0;
+            padding: 0 16px;
+            z-index: 220;
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+            pointer-events: none;
+          }
+        }
+        .mv-capsule {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 8px 22px;
+          background: var(--glass-bg);
+          backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+          -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+          border: 1px solid var(--glass-border);
+          border-radius: 999px;
+          box-shadow: 0 1px 0 var(--glass-shine) inset, 0 8px 24px var(--glass-shadow);
+          cursor: pointer;
+          user-select: none;
+          -webkit-tap-highlight-color: transparent;
+          transition: transform 0.15s, opacity 0.15s;
+          pointer-events: auto;
+        }
+                  .mv-capsule:active {
+            transform: scale(0.95);
+            opacity: 0.85;
+          }
+        .mv-capsule:active { opacity: 0.7; }
+        .mv-capsule-name {
+          font-family: 'Instrument Serif', Georgia, serif;
+          font-style: italic;
+          font-size: 1.05rem;
+          font-weight: 400;
+          color: var(--text-1);
+          line-height: 1;
+          letter-spacing: -0.2px;
+        }
+        .mv-hint-bubble {
+          position: absolute;
+          top: calc(100% + 6px);
+          left: 50%;
+          transform: translateX(-50%);
+          background: var(--glass-bg);
+          backdrop-filter: blur(14px);
+          border: 1px solid var(--glass-border);
+          border-radius: 10px;
+          padding: 7px 14px;
+          font-size: 0.74rem;
+          color: var(--text-2);
+          white-space: nowrap;
+          box-shadow: 0 8px 24px var(--glass-shadow);
+          pointer-events: none;
+          z-index: 10;
+          animation: hintFadeIn 0.3s ease;
+        }
+        @keyframes hintFadeIn {
+          from { opacity: 0; transform: translateX(-50%) translateY(4px); }
+          to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+      `}</style>
 
-      {/* Breadcrumb path */}
-      <div style={styles.path}>{breadcrumb}</div>
-
-      {/* Right actions */}
-      <div style={styles.actions}>
-        {rightSlot}
-
-        {isAdmin && onManageUsers && (
-          <button style={styles.iconBtn} onClick={onManageUsers} title="Manage Users">
-            <UserIcon />
-          </button>
-        )}
-
-        <button style={styles.iconBtn} onClick={toggleTheme} title="Toggle theme">
-          <SunIcon />
-          <MoonIcon />
+      <div className="mv-topbar-mobile" >
+        <button className="mv-capsule" onClick={handleCapsuleClick} aria-label="Toggle theme">
+          <span className="mv-capsule-name">MediaVault</span>
         </button>
+        {showHint && (
+          <div className="mv-hint-bubble">✦ Tap to switch light / dark</div>
+        )}
       </div>
-    </header>
+    </>
   );
 }
-
-const styles = {
-  topbar: {
-    position: "sticky",
-    top: 0,
-    zIndex: 100,
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-    padding: "10px 16px",
-    borderRadius: 18,
-    margin: "12px 12px 0",
-  },
-  menuBtn: {
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "center",
-    gap: 4,
-    width: 34,
-    height: 34,
-    background: "var(--glass-bg)",
-    border: "1px solid var(--glass-border)",
-    borderRadius: 10,
-    cursor: "pointer",
-    padding: "0 9px",
-    flexShrink: 0,
-    // Hidden on desktop via media handled in CSS module; here it's always visible
-    // (Sidebar handles its own desktop visibility)
-  },
-  bar: {
-    display: "block",
-    height: 1.5,
-    background: "var(--text-2)",
-    borderRadius: 2,
-    width: "100%",
-    transition: "background 0.2s",
-  },
-  path: {
-    flex: 1,
-    fontSize: "0.88rem",
-    fontWeight: 500,
-    color: "var(--text-2)",
-    overflow: "hidden",
-    whiteSpace: "nowrap",
-    textOverflow: "ellipsis",
-  },
-  actions: {
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    flexShrink: 0,
-  },
-  iconBtn: {
-    width: 34,
-    height: 34,
-    background: "var(--glass-bg)",
-    border: "1px solid var(--glass-border)",
-    borderRadius: 10,
-    color: "var(--text-2)",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    transition: "background 0.18s, color 0.18s",
-  },
-};

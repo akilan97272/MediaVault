@@ -7,7 +7,7 @@ import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Form, File, UploadFile, HTTPException
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from itsdangerous import Signer
 from passlib.context import CryptContext
@@ -59,6 +59,12 @@ _NO_CACHE = {
 }
 
 _CHUNK = 256 * 1024
+DIST_DIR     = os.path.join(BASE_DIR, "dist")
+_index_html: str | None = None
+
+def _load_index() -> str:
+    with open(os.path.join(DIST_DIR, "index.html"), encoding="utf-8") as f:
+        return f.read()
 
 # ── User store ────────────────────────────────────────────────────────────────
 
@@ -243,10 +249,15 @@ def load_activity() -> list:
 
 
 # ── App bootstrap ─────────────────────────────────────────────────────────────
-
+@asynccontextmanager
 async def lifespan(_app: FastAPI):
     load_users()
     load_restrictions()
+    global _index_html
+    try:
+        _index_html = _load_index()
+    except FileNotFoundError:
+        pass  # dev mode — Vite serves the frontend directly
     start_scheduler()
     yield
     stop_scheduler()
@@ -257,9 +268,10 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
-
 app.mount("/media",  StaticFiles(directory=MEDIA_DIR), name="media")
 app.mount("/static", StaticFiles(directory="static"),  name="static")
+if os.path.isdir(os.path.join(DIST_DIR, "assets")):
+    app.mount("/assets", StaticFiles(directory=os.path.join(DIST_DIR, "assets")), name="assets")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
@@ -330,8 +342,7 @@ def secure_path(sub: str) -> str:
 def login_page(request: Request):
     if get_current_user(request):
         return RedirectResponse("/gallery", status_code=302)
-    return JSONResponse({"page": "login"}, headers=_NO_CACHE)
-
+    return page("login")
 
 @app.post("/login")
 def login(request: Request, username: str = Form(...), password: str = Form(...)):
@@ -384,23 +395,23 @@ def logout():
 
 # ── Page routes (routing only, no HTML) ──────────────────────────────────────
 
-@app.get("/admin")
-def admin_page(request: Request):
-    if get_current_user(request) != "admin":
-        return JSONResponse(status_code=403, content={"error": "Forbidden"}, headers=_NO_CACHE)
-    return JSONResponse({"page": "admin", "user": "admin", "is_admin": True}, headers=_NO_CACHE)
-
-
 @app.get("/gallery")
 def gallery_page(request: Request):
     user = get_current_user(request)
     if not user:
-        return JSONResponse(status_code=401, content={"error": "Unauthorized"}, headers=_NO_CACHE)
+        return page("404", 404)
     if not is_allowed_today(user):
         day = _DAY_NAMES[datetime.now().weekday()]
         return RedirectResponse(f"/?error=day&day={day}", status_code=302)
-    return JSONResponse({"page": "gallery", "user": user, "is_admin": user == "admin"}, headers=_NO_CACHE)
+    return page("gallery", user=user)   # <-- pass user
 
+
+@app.get("/admin")
+def admin_page(request: Request):
+    user = get_current_user(request)
+    if user != "admin":
+        return page("404", 404)
+    return page("admin", user=user)     # <-- pass user
 
 # ── Admin helpers ─────────────────────────────────────────────────────────────
 
@@ -746,3 +757,83 @@ def delete_media(request: Request, path: str = "", filename: str = ""):
         raise HTTPException(status_code=500, detail=str(exc))
 
     return {"status": "deleted"}
+
+# ── Move file/folder ──────────────────────────────────────────────────────────
+
+@app.post("/api/move")
+async def move_media(request: Request):
+    """Move a file or folder to a different destination directory.
+
+    Body (JSON):
+        src_path  – current parent folder path   (e.g. "alice/trips")
+        filename  – file or folder name          (e.g. "photo.jpg" or "beach")
+        dest_path – target parent folder path    (e.g. "alice/archive")
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+    restricted = day_restricted_response(user)
+    if restricted:
+        return restricted
+
+    try:
+        body      = await request.json()
+        src_path  = (body.get("src_path")  or "").strip("/")
+        filename  = (body.get("filename")  or "").strip()
+        dest_path = (body.get("dest_path") or "").strip("/")
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Invalid JSON body"})
+
+    if not filename:
+        return JSONResponse(status_code=400, content={"error": "filename is required"})
+
+    # Reject path traversal in filename
+    if "/" in filename or "\\" in filename or filename in (".", ".."):
+        return JSONResponse(status_code=400, content={"error": "Invalid filename"})
+
+    full_src = f"{src_path}/{filename}" if src_path else filename
+    if not can_access_path(user, full_src):
+        return JSONResponse(status_code=403, content={"error": "Access denied"})
+    if not can_access_path(user, dest_path or filename):
+        return JSONResponse(status_code=403, content={"error": "Access denied for destination"})
+
+    src_abs  = secure_path(full_src)
+    dest_abs = secure_path(dest_path) if dest_path else os.path.abspath(MEDIA_DIR)
+
+    if not os.path.exists(src_abs):
+        return JSONResponse(status_code=404, content={"error": "Source not found"})
+    if not os.path.isdir(dest_abs):
+        return JSONResponse(status_code=404, content={"error": "Destination folder not found"})
+
+    dest_file = os.path.join(dest_abs, filename)
+    if os.path.exists(dest_file):
+        return JSONResponse(status_code=409,
+            content={"error": f"'{filename}' already exists in destination"})
+
+    try:
+        shutil.move(src_abs, dest_file)
+    except OSError as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)})
+
+    return {"status": "moved", "filename": filename, "dest": dest_path}
+
+
+def page(page_key: str, status: int = 200, user: str | None = None) -> HTMLResponse:
+    global _index_html
+    if _index_html is None:
+        _index_html = _load_index()
+    import json as _json
+    init = _json.dumps({"user": user, "is_admin": user == "admin"})
+    injection = f'<script>window.__PAGE__="{page_key}";window.__INIT__={init};</script>\n'
+    html = _index_html.replace("</head>", injection + "</head>", 1)
+    return HTMLResponse(content=html, status_code=status, headers=dict(_NO_CACHE))
+
+
+# add this new route alongside the other page routes
+@app.get("/api/me")
+def me(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    return {"username": user, "is_admin": user == "admin"}

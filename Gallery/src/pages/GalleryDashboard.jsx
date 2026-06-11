@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import BaseLayout from "../components/BaseLayout";
 import Sidebar from "../components/Sidebar";
 import TopBar from "../components/TopBar";
+import { useAuth } from "../context/AuthContext";
 
 const PAGE_SIZE = 40;
 
@@ -12,41 +13,245 @@ function buildBreadcrumb(path) {
   return path.split("/").join(" / ");
 }
 
-/* ── Folder Card ─────────────────────────────────────────── */
-function FolderCard({ name, onClick, onDelete, isAdmin, currentUser, path }) {
-  const isOwner = isAdmin || path?.startsWith(currentUser + "/") || !path?.includes("/");
+/* ────────────────────────────────────────────────────────────
+   Context Menu (right-click / long-press)
+   Works for both files and folders.
+   ──────────────────────────────────────────────────────────── */
+function ContextMenu({ x, y, items, onClose }) {
+  const ref = useRef(null);
+
+  // Adjust position so the menu stays on-screen
+  const [pos, setPos] = useState({ x, y });
+  useEffect(() => {
+    if (!ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    setPos({
+      x: x + rect.width  > vw ? vw - rect.width  - 8 : x,
+      y: y + rect.height > vh ? vh - rect.height - 8 : y,
+    });
+  }, [x, y]);
+
+  // Close on click-outside or scroll
+  useEffect(() => {
+    const close = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) onClose();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("touchstart", close);
+    window.addEventListener("scroll",    onClose, true);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("touchstart", close);
+      window.removeEventListener("scroll",    onClose, true);
+    };
+  }, [onClose]);
+
   return (
-    <div style={gs.folderCard} onClick={onClick}>
+    <div
+      ref={ref}
+      style={{
+        position: "fixed",
+        left: pos.x,
+        top:  pos.y,
+        zIndex: 600,
+        minWidth: 180,
+        background: "var(--glass-bg)",
+        backdropFilter: "blur(24px) saturate(200%)",
+        WebkitBackdropFilter: "blur(24px) saturate(200%)",
+        border: "1px solid var(--glass-border)",
+        borderRadius: 14,
+        boxShadow: "0 1px 0 var(--glass-shine) inset, 0 16px 48px var(--glass-shadow)",
+        padding: "5px 0",
+        animation: "ctxFadeIn 0.12s ease",
+      }}
+    >
+      {items.map((item, i) =>
+        item === "divider" ? (
+          <div key={i} style={{ height: 1, background: "var(--glass-border)", margin: "4px 0" }} />
+        ) : (
+          <button
+            key={i}
+            style={{
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "9px 14px",
+              background: "transparent",
+              border: "none",
+              borderRadius: 0,
+              cursor: "pointer",
+              fontFamily: "inherit",
+              fontSize: "0.87rem",
+              fontWeight: 500,
+              color: item.danger ? "var(--error)" : "var(--text-1)",
+              textAlign: "left",
+              transition: "background 0.12s",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = item.danger ? "rgba(255,107,107,0.08)" : "rgba(128,128,128,0.1)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            onClick={() => { item.action(); onClose(); }}
+          >
+            <span style={{ opacity: 0.75, lineHeight: 0 }}>{item.icon}</span>
+            {item.label}
+          </button>
+        )
+      )}
+    </div>
+  );
+}
+
+/* ── Move File Modal ─────────────────────────────────────── */
+function MoveModal({ filenames, currentPath, folderTree, onClose, onMoved }) {
+  const [dest, setDest] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  function flattenTree(nodes) {
+    const paths = [""];
+    function walk(list, pre) {
+      for (const n of list) {
+        const p = pre ? `${pre}/${n.name}` : n.name;
+        paths.push(p);
+        if (n.children?.length) walk(n.children, p);
+      }
+    }
+    walk(nodes, "");
+    return paths;
+  }
+
+  const allPaths = flattenTree(folderTree);
+
+  async function move() {
+    if (dest === currentPath) return setError("Already in that folder");
+    setLoading(true); setError("");
+    try {
+      for (const fn of filenames) {
+        const res = await fetch("/api/move", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ src_path: currentPath, filename: fn, dest_path: dest }),
+        });
+        if (!res.ok) {
+          const d = await res.json();
+          setError(d.error || `Failed to move "${fn}"`);
+          setLoading(false);
+          return;
+        }
+      }
+      onMoved(); onClose();
+    } catch { setError("Network error"); }
+    finally { setLoading(false); }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="glass-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Move {filenames.length} item{filenames.length !== 1 ? "s" : ""}</h2>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          {error && <div className="error-pill">{error}</div>}
+          <label style={{ fontSize: "0.82rem", color: "var(--text-2)", fontWeight: 500 }}>
+            Destination Folder
+          </label>
+          <select className="glass-input" value={dest} onChange={(e) => setDest(e.target.value)}>
+            {allPaths.map((p) => (
+              <option key={p} value={p}>{p === "" ? "/ (root)" : `/${p}`}</option>
+            ))}
+          </select>
+          <button className="glass-btn-primary" onClick={move} disabled={loading || dest === currentPath}>
+            {loading ? "Moving…" : "Move Here"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Folder Card ─────────────────────────────────────────── */
+function FolderCard({ name, onClick, onContextMenu, selected }) {
+  const longPressTimer = useRef(null);
+
+  function startLongPress(e) {
+    // Mobile long-press → context menu
+    const touch = e.touches?.[0];
+    longPressTimer.current = setTimeout(() => {
+      onContextMenu(touch?.clientX ?? 80, touch?.clientY ?? 80);
+    }, 500);
+  }
+  function cancelLongPress() {
+    clearTimeout(longPressTimer.current);
+  }
+
+  return (
+    <div
+      style={{
+        ...gs.folderCard,
+        ...(selected ? gs.folderCardSelected : {}),
+      }}
+      onClick={onClick}
+      onContextMenu={(e) => { e.preventDefault(); onContextMenu(e.clientX, e.clientY); }}
+      onTouchStart={startLongPress}
+      onTouchEnd={cancelLongPress}
+      onTouchMove={cancelLongPress}
+    >
       <div style={gs.folderCardInner}>
         <svg viewBox="0 0 48 40" fill="none" width="48" height="40">
           <path
             d="M2 8a4 4 0 014-4h12l4 4h20a4 4 0 014 4v22a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"
-            fill="var(--folder-fill)" stroke="var(--folder-stroke)" strokeWidth="1.4"
+            fill={selected ? "var(--accent-bg)" : "var(--folder-fill)"}
+            stroke={selected ? "var(--accent)" : "var(--folder-stroke)"}
+            strokeWidth="1.4"
           />
         </svg>
         <span style={gs.folderName}>{name}</span>
       </div>
-      {isOwner && (
-        <button
-          style={gs.deleteBtn}
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          title="Delete folder"
-        >
-          <svg viewBox="0 0 20 20" fill="none" width="13" height="13">
-            <path d="M5 6h10M8 6V4h4v2M7 9v6M10 9v6M13 9v6M6 6l.75 10h6.5L14 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      {selected && (
+        <div style={gs.folderCheckmark}>
+          <svg viewBox="0 0 16 16" fill="none" width="12" height="12">
+            <circle cx="8" cy="8" r="7" fill="var(--accent)" />
+            <path d="M5 8l2 2 4-4" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
-        </button>
+        </div>
       )}
     </div>
   );
 }
 
 /* ── Media Card ──────────────────────────────────────────── */
-function MediaCard({ src, isVideo, selected, onSelect, onLightbox, onDelete }) {
+function MediaCard({ src, filename, isVideo, selected, onLightbox, onContextMenu }) {
+  const longPressTimer = useRef(null);
+  const didLongPress   = useRef(false);
+
+  function startLongPress(e) {
+    didLongPress.current = false;
+    const touch = e.touches?.[0];
+    longPressTimer.current = setTimeout(() => {
+      didLongPress.current = true;
+      // Vibrate on mobile for tactile feedback
+      navigator.vibrate?.(40);
+      onContextMenu(touch?.clientX ?? 80, touch?.clientY ?? 80);
+    }, 500);
+  }
+  function cancelLongPress() {
+    clearTimeout(longPressTimer.current);
+  }
+
   return (
     <div
       style={{ ...gs.mediaCard, ...(selected ? gs.mediaCardSelected : {}) }}
-      onClick={onLightbox}
+      onClick={(e) => {
+        if (didLongPress.current) { didLongPress.current = false; return; }
+        onLightbox();
+      }}
+      onContextMenu={(e) => { e.preventDefault(); onContextMenu(e.clientX, e.clientY); }}
+      onTouchStart={startLongPress}
+      onTouchEnd={cancelLongPress}
+      onTouchMove={cancelLongPress}
     >
       {isVideo ? (
         <div style={gs.videoThumb}>
@@ -57,16 +262,16 @@ function MediaCard({ src, isVideo, selected, onSelect, onLightbox, onDelete }) {
       ) : (
         <img src={src} loading="lazy" decoding="async" style={gs.mediaImg} alt="" />
       )}
-      <button
-        style={gs.selBtn}
-        onClick={(e) => { e.stopPropagation(); onSelect(); }}
-        title="Select"
-      >
-        {selected
-          ? <svg viewBox="0 0 16 16" fill="none" width="14" height="14"><circle cx="8" cy="8" r="7" fill="var(--accent)" /><path d="M5 8l2 2 4-4" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" /></svg>
-          : <svg viewBox="0 0 16 16" fill="none" width="14" height="14"><circle cx="8" cy="8" r="7" stroke="rgba(255,255,255,0.6)" strokeWidth="1.4" /></svg>
-        }
-      </button>
+
+      {/* Selection indicator — only shows when selected */}
+      {selected && (
+        <div style={gs.selIndicator}>
+          <svg viewBox="0 0 16 16" fill="none" width="16" height="16">
+            <circle cx="8" cy="8" r="7" fill="var(--accent)" />
+            <path d="M5 8l2 2 4-4" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </div>
+      )}
     </div>
   );
 }
@@ -77,11 +282,34 @@ function Lightbox({ files, index, onClose, onPrev, onNext }) {
   if (!file) return null;
   const isVideo = /\.(mp4|webm|mkv)$/i.test(file);
 
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === "ArrowLeft")  onPrev();
+      if (e.key === "ArrowRight") onNext();
+      if (e.key === "Escape")     onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose, onPrev, onNext]);
+
   return (
     <div style={lb.overlay} onClick={onClose}>
       <button style={lb.closeBtn} onClick={onClose}>✕</button>
       <button style={{ ...lb.navBtn, left: 12 }} onClick={(e) => { e.stopPropagation(); onPrev(); }}>‹</button>
       <button style={{ ...lb.navBtn, right: 12 }} onClick={(e) => { e.stopPropagation(); onNext(); }}>›</button>
+      {/* Download button in lightbox */}
+      <a
+        href={file}
+        download
+        onClick={(e) => e.stopPropagation()}
+        style={lb.downloadBtn}
+        title="Download"
+      >
+        <svg viewBox="0 0 20 20" fill="none" width="16" height="16">
+          <path d="M10 3v10M6 9l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M3 15v1a1 1 0 001 1h12a1 1 0 001-1v-1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </a>
       <div style={lb.content} onClick={(e) => e.stopPropagation()}>
         {isVideo
           ? <video src={file} controls autoPlay style={lb.media} />
@@ -105,6 +333,14 @@ const lb = {
     color: "#fff", cursor: "pointer", fontSize: "1rem",
     display: "flex", alignItems: "center", justifyContent: "center",
     zIndex: 10,
+  },
+  downloadBtn: {
+    position: "absolute", top: 16, right: 60,
+    width: 36, height: 36, borderRadius: "50%",
+    background: "rgba(255,255,255,0.1)", border: "none",
+    color: "#fff", cursor: "pointer",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    zIndex: 10, textDecoration: "none",
   },
   navBtn: {
     position: "absolute", top: "50%", transform: "translateY(-50%)",
@@ -281,37 +517,47 @@ function ActivityLogModal({ onClose }) {
 /* ── Main GalleryDashboard ───────────────────────────────── */
 export default function GalleryDashboard() {
   const [currentPath, setCurrentPath] = useState("");
-  const [files, setFiles] = useState([]);
-  const [folders, setFolders] = useState([]);
-  const [folderTree, setFolderTree] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [files, setFiles]             = useState([]);
+  const [folders, setFolders]         = useState([]);
+  const [folderTree, setFolderTree]   = useState([]);
+  const [loading, setLoading]         = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [page, setPage] = useState(0);
-  const [selected, setSelected] = useState(new Set());
-  const [lightboxIndex, setLightboxIndex] = useState(null);
+  const [page, setPage]               = useState(0);
+  const [selected, setSelected]       = useState(new Set());   // filenames
+  const [selectedFolders, setSelectedFolders] = useState(new Set());
+  const [lightboxIndex, setLightboxIndex]     = useState(null);
   const [showCreateFolder, setShowCreateFolder] = useState(false);
-  const [showUserManager, setShowUserManager] = useState(false);
-  const [showActivityLog, setShowActivityLog] = useState(false);
+  const [showUserManager,  setShowUserManager]  = useState(false);
+  const [showActivityLog,  setShowActivityLog]  = useState(false);
+  // Context menu state
+  const [ctxMenu, setCtxMenu] = useState(null);
+  // { x, y, items: [] }
+  // Move modal
+  const [moveTarget, setMoveTarget] = useState(null);
+  // { filename, isFolder }
+
   const fileInputRef = useRef(null);
 
-  const user = window.CURRENT_USER || "user";
-  const isAdmin = window.IS_ADMIN || false;
+const { user, isAdmin } = useAuth();
 
-  // Load folder tree once
+  /* ── Load folder tree once ─────────────────────────────── */
   useEffect(() => {
     fetch("/api/tree")
       .then((r) => r.json())
       .then((d) => setFolderTree(d.tree || []));
   }, []);
 
-  // Load media on path change
+  /* ── Load media on path change ─────────────────────────── */
   const loadMedia = useCallback(async (path = currentPath) => {
-    setLoading(true); setFiles([]); setFolders([]); setSelected(new Set()); setPage(0);
+    setLoading(true);
+    setFiles([]); setFolders([]);
+    setSelected(new Set()); setSelectedFolders(new Set());
+    setPage(0);
     try {
       const res = await fetch(`/api/media?path=${encodeURIComponent(path)}`);
       if (res.status === 401) { window.location.href = "/"; return; }
       const data = await res.json();
-      setFiles(data.files || []);
+      setFiles(data.files   || []);
       setFolders(data.folders || []);
     } finally {
       setLoading(false);
@@ -320,9 +566,7 @@ export default function GalleryDashboard() {
 
   useEffect(() => { loadMedia(currentPath); }, [currentPath]);
 
-  function navigate(path) {
-    setCurrentPath(path);
-  }
+  function navigate(path) { setCurrentPath(path); }
 
   function goUp() {
     const parts = currentPath.split("/");
@@ -330,12 +574,14 @@ export default function GalleryDashboard() {
     navigate(parts.join("/"));
   }
 
-  // Pagination
-  const pageFiles = files.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  /* ── Pagination ────────────────────────────────────────── */
+  const pageFiles  = files.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const totalPages = Math.ceil(files.length / PAGE_SIZE);
 
-  // Selection
-  function toggleSelect(filename) {
+  /* ── Selection helpers ─────────────────────────────────── */
+  const totalSelected = selected.size + selectedFolders.size;
+
+  function toggleSelectFile(filename) {
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(filename)) next.delete(filename); else next.add(filename);
@@ -343,25 +589,60 @@ export default function GalleryDashboard() {
     });
   }
 
-  async function deleteSelected() {
-    if (!confirm(`Delete ${selected.size} item(s)?`)) return;
-    for (const name of selected) {
-      await fetch(`/api/media?path=${encodeURIComponent(currentPath)}&filename=${encodeURIComponent(name)}`, { method: "DELETE" });
-    }
-    setSelected(new Set());
-    loadMedia(currentPath);
+  function toggleSelectFolder(name) {
+    setSelectedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
   }
 
-  async function deleteFolder(name) {
-    if (!confirm(`Delete folder "${name}" and all its contents?`)) return;
+  function clearSelection() {
+    setSelected(new Set());
+    setSelectedFolders(new Set());
+  }
+
+  /* ── Delete helpers ────────────────────────────────────── */
+  async function deleteFile(filename) {
+    await fetch(
+      `/api/media?path=${encodeURIComponent(currentPath)}&filename=${encodeURIComponent(filename)}`,
+      { method: "DELETE" }
+    );
+  }
+
+  async function deleteFolderByName(name) {
     const fullPath = currentPath ? `${currentPath}/${name}` : name;
-    await fetch(`/api/media?path=${encodeURIComponent(fullPath)}&filename=`, { method: "DELETE" });
-    loadMedia(currentPath);
-    // Refresh tree
+    await fetch(
+      `/api/media?path=${encodeURIComponent(fullPath)}&filename=`,
+      { method: "DELETE" }
+    );
     fetch("/api/tree").then((r) => r.json()).then((d) => setFolderTree(d.tree || []));
   }
 
-  // Upload
+  async function deleteSelected() {
+    const total = totalSelected;
+    if (!confirm(`Delete ${total} item(s)?`)) return;
+    for (const name of selected)        await deleteFile(name);
+    for (const name of selectedFolders) await deleteFolderByName(name);
+    clearSelection();
+    loadMedia(currentPath);
+  }
+
+  /* ── Download helper ───────────────────────────────────── */
+  function downloadFile(filename) {
+    const url  = `/media/${currentPath ? currentPath + "/" : ""}${filename}`;
+    const link = document.createElement("a");
+    link.href     = url;
+    link.download = filename;
+    link.click();
+  }
+
+  /* ── Download all selected ─────────────────────────────── */
+  function downloadSelected() {
+    for (const name of selected) downloadFile(name);
+  }
+
+  /* ── Upload ────────────────────────────────────────────── */
   async function handleUpload(e) {
     const uploadFiles = Array.from(e.target.files || []);
     if (!uploadFiles.length) return;
@@ -374,42 +655,177 @@ export default function GalleryDashboard() {
     loadMedia(currentPath);
   }
 
-  // Lightbox file URLs
+  /* ── Lightbox URLs ─────────────────────────────────────── */
   const lightboxUrls = pageFiles
     .filter((f) => /\.(jpg|jpeg|png|gif|mp4|webm|mkv)$/i.test(f))
     .map((f) => `/media/${currentPath ? currentPath + "/" : ""}${f}`);
+
+  /* ── Context menu builders ─────────────────────────────── */
+  function openFileContextMenu(x, y, filename, fileIdx) {
+    const isSelected = selected.has(filename);
+    const fileUrl = `/media/${currentPath ? currentPath + "/" : ""}${filename}`;
+
+    setCtxMenu({
+      x, y,
+      items: [
+        // If multiple already selected show "bulk" options at top
+        ...(totalSelected > 1 ? [
+          {
+            label: `Open (${totalSelected > 1 ? "1" : ""})`,
+            icon:  <EyeIcon />,
+            action: () => setLightboxIndex(fileIdx),
+          },
+        ] : [
+          {
+            label: "Open",
+            icon:  <EyeIcon />,
+            action: () => setLightboxIndex(fileIdx),
+          },
+        ]),
+        {
+          label: isSelected ? "Deselect" : "Select",
+          icon:  <CheckIcon />,
+          action: () => toggleSelectFile(filename),
+        },
+        ...(totalSelected > 1 ? [
+          {
+            label: `Select All (${files.length})`,
+            icon:  <CheckAllIcon />,
+            action: () => setSelected(new Set(pageFiles)),
+          },
+        ] : []),
+        "divider",
+        {
+          label: "Download",
+          icon:  <DownloadIcon />,
+          action: () => downloadFile(filename),
+        },
+        ...(selected.size > 1 ? [
+          {
+            label: `Download ${selected.size} selected`,
+            icon:  <DownloadIcon />,
+            action: downloadSelected,
+          },
+        ] : []),
+        {
+          label: "Move to…",
+          icon:  <MoveIcon />,
+          action: () => setMoveTarget({ filename, isFolder: false }),
+        },
+        "divider",
+        {
+          label: "Delete",
+          icon:  <TrashIcon />,
+          danger: true,
+          action: async () => {
+            if (!confirm(`Delete "${filename}"?`)) return;
+            await deleteFile(filename);
+            loadMedia(currentPath);
+          },
+        },
+        ...(totalSelected > 1 ? [
+          {
+            label: `Delete ${totalSelected} selected`,
+            icon:  <TrashIcon />,
+            danger: true,
+            action: deleteSelected,
+          },
+        ] : []),
+      ],
+    });
+  }
+
+  function openFolderContextMenu(x, y, folderName) {
+    const isSelected = selectedFolders.has(folderName);
+    setCtxMenu({
+      x, y,
+      items: [
+        {
+          label: "Open Folder",
+          icon:  <FolderOpenIcon />,
+          action: () => navigate(currentPath ? `${currentPath}/${folderName}` : folderName),
+        },
+        {
+          label: isSelected ? "Deselect" : "Select",
+          icon:  <CheckIcon />,
+          action: () => toggleSelectFolder(folderName),
+        },
+        "divider",
+        {
+          label: "Move to…",
+          icon:  <MoveIcon />,
+          action: () => setMoveTarget({ filename: folderName, isFolder: true }),
+        },
+        "divider",
+        {
+          label: "Delete Folder",
+          icon:  <TrashIcon />,
+          danger: true,
+          action: async () => {
+            if (!confirm(`Delete folder "${folderName}" and all its contents?`)) return;
+            await deleteFolderByName(folderName);
+            loadMedia(currentPath);
+          },
+        },
+      ],
+    });
+  }
 
   const breadcrumb = buildBreadcrumb(currentPath);
 
   return (
     <BaseLayout>
-      {/* Responsive sidebar visibility CSS */}
       <style>{`
+        @keyframes ctxFadeIn {
+          from { opacity: 0; transform: scale(0.96) translateY(-4px); }
+          to   { opacity: 1; transform: scale(1)    translateY(0); }
+        }
         @media (min-width: 768px) {
-          .sidebar-desktop { display: flex !important; }
+          .sidebar-desktop   { display: flex !important; }
           .bottom-nav-mobile { display: none !important; }
-          .main-content { margin-left: 268px !important; }
-          .topbar-menu-btn { display: none !important; }
+          .main-content      { margin-left: 268px !important; }
+          .mv-topbar-mobile  { display: none !important; }
         }
         @media (max-width: 767px) {
-          .sidebar-desktop { display: none !important; }
-          .bottom-nav-mobile { display: flex !important; }
-          .main-content { margin-left: 0 !important; padding-bottom: 80px !important; }
+          .main-content { margin-left: 0 !important; padding-bottom: 88px !important; padding-top: 52px !important; }
+          .desktop-toolbar { display: none !important; }
+        }
+        @media (min-width: 768px) {
+          .desktop-toolbar { display: flex !important; }
+        }
         }
         @keyframes slideInLeft {
           from { transform: translateX(-100%); opacity: 0; }
-          to   { transform: translateX(0); opacity: 1; }
+          to   { transform: translateX(0);     opacity: 1; }
         }
         @keyframes slideUp {
           from { transform: translateY(40px); opacity: 0; }
-          to   { transform: translateY(0); opacity: 1; }
+          to   { transform: translateY(0);    opacity: 1; }
         }
-        .gallery-item:hover { transform: scale(1.02); }
+        .folder-card:hover  { transform: translateY(-2px); box-shadow: 0 8px 24px var(--glass-shadow); }
+        .media-card:hover   { transform: scale(1.02); }
         .sidebar-nav-btn:hover { background: rgba(128,128,128,0.1); color: var(--text-1) !important; }
         [data-theme="light"] .glass-input { background: rgba(255,255,255,0.55); }
+        /* Right-click hint — desktop only */
+        .rc-hint {
+          position: absolute;
+          bottom: 5px; right: 6px;
+          font-size: 0.58rem;
+          color: var(--text-3);
+          pointer-events: none;
+          opacity: 0;
+          transition: opacity 0.2s;
+          font-weight: 500;
+        }
+        .folder-card:hover .rc-hint,
+        .media-card:hover  .rc-hint { opacity: 1; }
+        @media (max-width: 767px) { .rc-hint { display: none; } }
+        /* select <option> dark mode fix */
+        select option { background: #1a2235; color: #eee; }
+        [data-theme="light"] select option { background: #fff; color: #111; }
       `}</style>
 
-      {/* Sidebar — desktop class applied via CSS */}
+      {/* ── Sidebar (desktop) ───────────────────────────── */}
       <div className="sidebar-desktop" style={{ display: "flex" }}>
         <Sidebar
           user={user} isAdmin={isAdmin}
@@ -423,43 +839,32 @@ export default function GalleryDashboard() {
         />
       </div>
 
-      {/* Mobile sidebar (overlay) */}
-      <div className="sidebar-mobile" style={{ display: "none" }}>
-        {sidebarOpen && (
+      {/* ── Mobile sidebar overlay ──────────────────────── */}
+      {sidebarOpen && (
+        <div className="sidebar-mobile">
           <Sidebar
             user={user} isAdmin={isAdmin}
             folderTree={folderTree} currentPath={currentPath}
-            onNavigate={navigate} isOpen={sidebarOpen}
+            onNavigate={(p) => { navigate(p); setSidebarOpen(false); }}
+            isOpen={sidebarOpen}
             onClose={() => setSidebarOpen(false)}
             onUpload={() => { fileInputRef.current?.click(); setSidebarOpen(false); }}
             onCreateFolder={() => { setShowCreateFolder(true); setSidebarOpen(false); }}
             onManageUsers={() => { setShowUserManager(true); setSidebarOpen(false); }}
             onActivityLog={() => { setShowActivityLog(true); setSidebarOpen(false); }}
           />
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Main content area */}
+      {/* ── Main content ────────────────────────────────── */}
       <div className="main-content" style={gs.mainContent}>
-        {/* TopBar */}
+
+        {/* Mobile capsule topbar (component handles its own show/hide) */}
         <TopBar
           breadcrumb={breadcrumb}
           onMenuClick={() => setSidebarOpen(true)}
           isAdmin={isAdmin}
           onManageUsers={() => setShowUserManager(true)}
-          rightSlot={
-            <button
-              style={gs.uploadBtn}
-              onClick={() => fileInputRef.current?.click()}
-              title="Upload files"
-            >
-              <svg viewBox="0 0 20 20" fill="none" width="15" height="15">
-                <path d="M10 13V4M6 7l4-4 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M3 14v2a1 1 0 001 1h12a1 1 0 001-1v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-              <span style={{ fontSize: "0.82rem", fontWeight: 600 }}>Upload</span>
-            </button>
-          }
         />
 
         {/* Hidden file input */}
@@ -470,39 +875,76 @@ export default function GalleryDashboard() {
           onChange={handleUpload}
         />
 
-        {/* Selection bar */}
-        {selected.size > 0 && (
+        {/* ── Selection action bar ──────────────────────── */}
+        {totalSelected > 0 && (
           <div style={gs.selectionBar}>
-            <button style={gs.selCancel} onClick={() => setSelected(new Set())}>
-              <svg viewBox="0 0 20 20" fill="none" width="14" height="14"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+            <button style={gs.selCancel} onClick={clearSelection}>
+              <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
               Cancel
             </button>
-            <span style={{ fontSize: "0.84rem", color: "var(--text-2)", fontWeight: 500 }}>{selected.size} selected</span>
+
+            <span style={{ fontSize: "0.84rem", color: "var(--text-2)", fontWeight: 500 }}>
+              {totalSelected} selected
+            </span>
+
+            {/* Download selected (files only) */}
+            {selected.size > 0 && (
+              <button style={gs.selAction} onClick={downloadSelected} title="Download selected">
+                <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                  <path d="M10 3v10M6 9l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M3 15v1a1 1 0 001 1h12a1 1 0 001-1v-1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+                Download
+              </button>
+            )}
+
+            {/* Move selected — only if single item */}
+            {totalSelected > 0 && (
+                <button
+                  style={gs.selAction}
+                  onClick={() => setMoveTarget({ filenames: [...selected, ...selectedFolders] })}
+                >
+                <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                  <path d="M4 10h12M12 6l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Move
+              </button>
+            )}
+
             <button style={gs.selDelete} onClick={deleteSelected}>
-              <svg viewBox="0 0 20 20" fill="none" width="14" height="14"><path d="M5 6h10M8 6V4h4v2M7 9v6M10 9v6M13 9v6M6 6l.75 10h6.5L14 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                <path d="M5 6h10M8 6V4h4v2M7 9v6M10 9v6M13 9v6M6 6l.75 10h6.5L14 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
               Delete
             </button>
           </div>
         )}
-
-        {/* Path nav */}
+        {/* ── Path label ───────────────────────────────────── */}
         {currentPath && (
-          <div style={gs.pathNav}>
-            <button style={gs.backBtn} onClick={goUp}>
-              <svg viewBox="0 0 20 20" fill="none" width="15" height="15"><path d="M13 5l-5 5 5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-              Back
-            </button>
-            <span style={gs.pathLabel}>/{currentPath}</span>
-            <button
-              style={{ ...gs.newFolderBtn }}
-              onClick={() => setShowCreateFolder(true)}
-            >
-              + New Folder
-            </button>
+          <div style={{ padding: "10px 0 0", display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: "0.75rem", color: "var(--text-3)", fontWeight: 500 }}>
+              /{currentPath}
+            </span>
           </div>
         )}
 
-        {/* Content area */}
+        {/* ── Desktop toolbar: Upload + New Folder ── */}
+        <div style={gs.desktopToolbar} className="desktop-toolbar">
+          <button style={gs.uploadBtn} onClick={() => fileInputRef.current?.click()}>
+            <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+              <path d="M10 13V4M6 7l4-4 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M3 14v2a1 1 0 001 1h12a1 1 0 001-1v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            Upload
+          </button>
+          <button style={gs.newFolderBtn} onClick={() => setShowCreateFolder(true)}>
+            + New Folder
+          </button>
+        </div>
+
+        {/* ── Media grid ───────────────────────────────── */}
         <main style={gs.grid}>
           {loading && (
             <div style={gs.loadingState}>
@@ -515,40 +957,51 @@ export default function GalleryDashboard() {
             <div style={gs.emptyState}>
               <div style={{ fontSize: "2.5rem" }}>🖼</div>
               <p style={{ color: "var(--text-3)", fontSize: "0.9rem" }}>No media here yet</p>
-              <button style={gs.emptyUploadBtn} onClick={() => fileInputRef.current?.click()}>Upload Files</button>
+              <button style={gs.emptyUploadBtn} onClick={() => fileInputRef.current?.click()}>
+                Upload Files
+              </button>
             </div>
           )}
 
+          {/* Folders */}
           {!loading && folders.map((folder) => (
-            <FolderCard
-              key={folder} name={folder}
-              onClick={() => navigate(currentPath ? `${currentPath}/${folder}` : folder)}
-              onDelete={() => deleteFolder(folder)}
-              isAdmin={isAdmin} currentUser={user}
-              path={currentPath ? `${currentPath}/${folder}` : folder}
-            />
+            <div key={folder} style={{ position: "relative" }} className="folder-card-wrap">
+              <FolderCard
+                name={folder}
+                selected={selectedFolders.has(folder)}
+                onClick={() => {
+                  // If in selection mode, toggle instead of navigate
+                  if (totalSelected > 0) { toggleSelectFolder(folder); return; }
+                  navigate(currentPath ? `${currentPath}/${folder}` : folder);
+                }}
+                onContextMenu={(x, y) => openFolderContextMenu(x, y, folder)}
+              />
+              <span className="rc-hint">right-click</span>
+            </div>
           ))}
 
+          {/* Files */}
           {!loading && pageFiles.map((file, idx) => {
             const isVideo = /\.(mp4|webm|mkv)$/i.test(file);
-            const src = `/media/${currentPath ? currentPath + "/" : ""}${file}`;
+            const src     = `/media/${currentPath ? currentPath + "/" : ""}${file}`;
             return (
-              <MediaCard
-                key={file} src={src} isVideo={isVideo}
-                selected={selected.has(file)}
-                onSelect={() => toggleSelect(file)}
-                onLightbox={() => setLightboxIndex(idx)}
-                onDelete={async () => {
-                  if (!confirm(`Delete "${file}"?`)) return;
-                  await fetch(`/api/media?path=${encodeURIComponent(currentPath)}&filename=${encodeURIComponent(file)}`, { method: "DELETE" });
-                  loadMedia(currentPath);
-                }}
-              />
+              <div key={file} style={{ position: "relative" }} className="media-card-wrap">
+                <MediaCard
+                  src={src} filename={file} isVideo={isVideo}
+                  selected={selected.has(file)}
+                  onLightbox={() => {
+                    if (totalSelected > 0) { toggleSelectFile(file); return; }
+                    setLightboxIndex(idx);
+                  }}
+                  onContextMenu={(x, y) => openFileContextMenu(x, y, file, idx)}
+                />
+                <span className="rc-hint">right-click</span>
+              </div>
             );
           })}
         </main>
 
-        {/* Pagination */}
+        {/* ── Pagination ───────────────────────────────── */}
         {totalPages > 1 && (
           <div style={gs.pagination}>
             {Array.from({ length: totalPages }, (_, i) => (
@@ -564,7 +1017,7 @@ export default function GalleryDashboard() {
         )}
       </div>
 
-      {/* Bottom nav (mobile) */}
+      {/* ── Mobile bottom Sidebar nav ───────────────────── */}
       <div className="bottom-nav-mobile" style={{ display: "none" }}>
         <Sidebar
           user={user} isAdmin={isAdmin}
@@ -578,17 +1031,41 @@ export default function GalleryDashboard() {
         />
       </div>
 
-      {/* Lightbox */}
+      {/* ── Lightbox ─────────────────────────────────────── */}
       {lightboxIndex !== null && (
         <Lightbox
-          files={lightboxUrls} index={lightboxIndex}
+          files={lightboxUrls}
+          index={lightboxIndex}
           onClose={() => setLightboxIndex(null)}
           onPrev={() => setLightboxIndex((i) => (i - 1 + lightboxUrls.length) % lightboxUrls.length)}
           onNext={() => setLightboxIndex((i) => (i + 1) % lightboxUrls.length)}
         />
       )}
 
-      {/* Modals */}
+      {/* ── Context menu ─────────────────────────────────── */}
+      {ctxMenu && (
+        <ContextMenu
+          x={ctxMenu.x} y={ctxMenu.y}
+          items={ctxMenu.items}
+          onClose={() => setCtxMenu(null)}
+        />
+      )}
+
+      {/* ── Move modal ───────────────────────────────────── */}
+      {moveTarget && (
+        <MoveModal
+          filenames={moveTarget.filenames}
+          currentPath={currentPath}
+          folderTree={folderTree}
+          onClose={() => setMoveTarget(null)}
+          onMoved={() => {
+            loadMedia(currentPath);
+            fetch("/api/tree").then((r) => r.json()).then((d) => setFolderTree(d.tree || []));
+          }}
+        />
+      )}
+
+      {/* ── Other modals ─────────────────────────────────── */}
       {showCreateFolder && (
         <CreateFolderModal
           currentPath={currentPath}
@@ -600,10 +1077,51 @@ export default function GalleryDashboard() {
         />
       )}
       {showUserManager && <UserManagerModal onClose={() => setShowUserManager(false)} />}
-      {showActivityLog && <ActivityLogModal onClose={() => setShowActivityLog(false)} />}
+      {showActivityLog  && <ActivityLogModal onClose={() => setShowActivityLog(false)} />}
     </BaseLayout>
   );
 }
+
+/* ── Inline icon components ─────────────────────────────── */
+const EyeIcon = () => (
+  <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+    <path d="M1 10s3-6 9-6 9 6 9 6-3 6-9 6-9-6-9-6z" stroke="currentColor" strokeWidth="1.4"/>
+    <circle cx="10" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.4"/>
+  </svg>
+);
+const CheckIcon = () => (
+  <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+    <circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.4"/>
+    <path d="M7 10l2 2 4-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+  </svg>
+);
+const CheckAllIcon = () => (
+  <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+    <path d="M2 10l4 4 8-8M6 14l4-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+const DownloadIcon = () => (
+  <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+    <path d="M10 3v10M6 9l4 4 4-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M3 15v1a1 1 0 001 1h12a1 1 0 001-1v-1" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+  </svg>
+);
+const MoveIcon = () => (
+  <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+    <path d="M4 10h12M12 6l4 4-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+const TrashIcon = () => (
+  <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+    <path d="M5 6h10M8 6V4h4v2M7 9v6M10 9v6M13 9v6M6 6l.75 10h6.5L14 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+const FolderOpenIcon = () => (
+  <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+    <path d="M2 6a2 2 0 012-2h3.586a1 1 0 01.707.293L9.414 5.5H16a2 2 0 012 2v1H2V6z" stroke="currentColor" strokeWidth="1.3"/>
+    <path d="M2 8.5h16l-1.5 7H3.5L2 8.5z" stroke="currentColor" strokeWidth="1.3"/>
+  </svg>
+);
 
 /* ── Gallery Styles ─────────────────────────────────────── */
 const gs = {
@@ -613,20 +1131,34 @@ const gs = {
     minHeight: "100dvh",
     transition: "margin-left 0.3s",
   },
+  desktopToolbar: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "10px 0 4px",
+  },
   selectionBar: {
-    display: "flex", alignItems: "center", gap: 12,
+    display: "flex", alignItems: "center", gap: 8,
     margin: "10px 0 0",
-    padding: "10px 16px",
+    padding: "8px 14px",
     background: "var(--glass-bg)",
     backdropFilter: "blur(var(--glass-blur))",
     border: "1px solid var(--glass-border)",
     borderRadius: 14,
+    flexWrap: "wrap",
   },
   selCancel: {
     display: "flex", alignItems: "center", gap: 6,
     background: "transparent", border: "none",
     color: "var(--text-2)", cursor: "pointer",
     fontSize: "0.84rem", fontFamily: "inherit",
+  },
+  selAction: {
+    display: "flex", alignItems: "center", gap: 6,
+    background: "var(--accent-bg)", border: "1px solid var(--accent-border)",
+    borderRadius: 9, padding: "6px 12px",
+    color: "var(--accent)", cursor: "pointer",
+    fontSize: "0.82rem", fontFamily: "inherit", fontWeight: 600,
   },
   selDelete: {
     display: "flex", alignItems: "center", gap: 6,
@@ -635,7 +1167,7 @@ const gs = {
     border: "1px solid rgba(255,107,107,0.3)",
     borderRadius: 9, padding: "6px 12px",
     color: "var(--error)", cursor: "pointer",
-    fontSize: "0.84rem", fontFamily: "inherit", fontWeight: 600,
+    fontSize: "0.82rem", fontFamily: "inherit", fontWeight: 600,
   },
   pathNav: {
     display: "flex", alignItems: "center", gap: 10,
@@ -662,15 +1194,16 @@ const gs = {
   uploadBtn: {
     display: "flex", alignItems: "center", gap: 6,
     background: "var(--accent-bg)", border: "1px solid var(--accent-border)",
-    borderRadius: 10, padding: "7px 12px",
+    borderRadius: 10, padding: "7px 14px",
     color: "var(--accent)", cursor: "pointer", fontFamily: "inherit",
+    fontSize: "0.84rem", fontWeight: 600,
     transition: "background 0.18s",
   },
   grid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
     gap: 10,
-    padding: "14px 0",
+    padding: "10px 0",
   },
   loadingState: {
     gridColumn: "1 / -1",
@@ -696,6 +1229,12 @@ const gs = {
     cursor: "pointer",
     transition: "transform 0.18s, box-shadow 0.18s",
     display: "flex", flexDirection: "column",
+    WebkitUserSelect: "none", userSelect: "none",
+  },
+  folderCardSelected: {
+    border: "1.5px solid var(--accent)",
+    background: "var(--accent-bg)",
+    boxShadow: "0 0 0 2px var(--accent-glow)",
   },
   folderCardInner: {
     display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
@@ -705,14 +1244,8 @@ const gs = {
     textAlign: "center", overflow: "hidden", whiteSpace: "nowrap",
     textOverflow: "ellipsis", width: "100%",
   },
-  deleteBtn: {
-    position: "absolute", top: 6, right: 6,
-    width: 24, height: 24, borderRadius: 7,
-    background: "rgba(255,107,107,0.1)",
-    border: "1px solid rgba(255,107,107,0.25)",
-    color: "var(--error)", cursor: "pointer",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    opacity: 0, transition: "opacity 0.15s",
+  folderCheckmark: {
+    position: "absolute", top: 6, left: 6,
   },
   mediaCard: {
     aspectRatio: "1",
@@ -721,24 +1254,23 @@ const gs = {
     borderRadius: 12, overflow: "hidden",
     position: "relative", cursor: "pointer",
     transition: "transform 0.18s, box-shadow 0.18s",
+    WebkitUserSelect: "none", userSelect: "none",
   },
   mediaCardSelected: {
     border: "2px solid var(--accent)",
     boxShadow: "0 0 0 2px var(--accent-glow)",
   },
   mediaImg: {
-    width: "100%", height: "100%", objectFit: "cover",
-    display: "block",
+    width: "100%", height: "100%", objectFit: "cover", display: "block",
   },
   videoThumb: {
     width: "100%", height: "100%",
     background: "rgba(0,0,0,0.4)",
     display: "flex", alignItems: "center", justifyContent: "center",
   },
-  selBtn: {
+  selIndicator: {
     position: "absolute", top: 6, left: 6,
-    background: "transparent", border: "none",
-    cursor: "pointer", padding: 0, lineHeight: 0,
+    filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.5))",
   },
   pagination: {
     display: "flex", alignItems: "center", justifyContent: "center",

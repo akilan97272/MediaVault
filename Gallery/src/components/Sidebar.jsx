@@ -298,8 +298,26 @@ export default function Sidebar({
 
   return (
     <>
+     <style>{`
+        @media (max-width: 767px)  { .mv-bottom-nav { display: flex !important; } }
+        @media (min-width: 768px)  { .mv-bottom-nav { display: none !important; } }
+        @media (min-width: 768px)  { .mv-desktop-sidebar { display: flex !important; } }
+        @media (max-width: 767px)  { .mv-desktop-sidebar { display: none !important; } }
+        @keyframes slideInLeft {
+          from { transform: translateX(-100%); opacity: 0; }
+          to   { transform: translateX(0);     opacity: 1; }
+        }
+        @keyframes slideUp {
+          from { transform: translateY(40px); opacity: 0; }
+          to   { transform: translateY(0);    opacity: 1; }
+        }
+        @keyframes floatUp {
+          from { transform: translateX(-50%) translateY(20px); opacity: 0; }
+          to   { transform: translateX(-50%) translateY(0);    opacity: 1; }
+        }
+      `}</style>
       {/* ── Desktop floating sidebar (always visible ≥768px) ── */}
-      <aside style={sidebarStyles.desktopSidebar} className="glass-card">
+      <aside style={sidebarStyles.desktopSidebar} className="glass-card mv-desktop-sidebar">
         <SidebarContent
           user={user} isAdmin={isAdmin} folderTree={folderTree}
           currentPath={currentPath} onNavigate={onNavigate}
@@ -309,79 +327,189 @@ export default function Sidebar({
         />
       </aside>
 
-      {/* ── Mobile overlay sidebar (controlled by isOpen) ────── */}
+      {/* ── Mobile overlay sidebar (controlled by isOpen) ── */}
       {isOpen && (
         <>
-          <div style={sidebarStyles.overlay} onClick={onClose} />
-          <aside style={sidebarStyles.mobileSidebar} className="glass-card">
+          <div
+            style={{ ...sidebarStyles.overlay, zIndex: 305 }}
+            onClick={() => { onClose(); }}
+          />
+          <aside
+            style={{
+              ...sidebarStyles.mobileSidebar,
+              display: "flex",        // always render when isOpen=true
+            }}
+            className="glass-card"
+          >
             <SidebarContent
               user={user} isAdmin={isAdmin} folderTree={folderTree}
-              currentPath={currentPath} onNavigate={(p) => { onNavigate(p); onClose(); }}
-              onClose={onClose} onUpload={onUpload}
-              onCreateFolder={onCreateFolder} onManageUsers={onManageUsers}
+              currentPath={currentPath}
+              onNavigate={(p) => { onNavigate(p); onClose(); }}
+              onClose={onClose}
+              onUpload={onUpload}
+              onCreateFolder={onCreateFolder}
+              onManageUsers={onManageUsers}
               onActivityLog={onActivityLog}
             />
           </aside>
         </>
       )}
+      {/* ── Mobile floating bottom nav ── */}
+      <div
+        style={{
+          position: "fixed",
+          bottom: 16,
+          left: "50%",
+          transform: "translateX(-50%)",
+          display: "none",       // overridden to flex by .mv-bottom-nav
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 8,
+          zIndex: 250,
+        }}
+        className="mv-bottom-nav"
+      >
+        {/* User name capsule */}
+        <div style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 7,
+          padding: "5px 14px",
+          background: "var(--glass-bg)",
+          backdropFilter: "blur(var(--glass-blur)) saturate(180%)",
+          WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(180%)",
+          border: "1px solid var(--glass-border)",
+          borderRadius: 999,
+          boxShadow: "0 1px 0 var(--glass-shine) inset, 0 4px 16px var(--glass-shadow)",
+        }}>
+          <div style={{
+            width: 18, height: 18, borderRadius: "50%",
+            background: "var(--accent-bg)",
+            border: "1px solid var(--accent-border)",
+            color: "var(--accent)",
+            fontSize: "0.65rem", fontWeight: 700,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0,
+          }}>
+            {user?.[0]?.toUpperCase()}
+          </div>
+          <span style={{
+            fontSize: "0.78rem", fontWeight: 600,
+            color: "var(--text-1)", letterSpacing: "0.01em",
+          }}>
+            {user}
+          </span>
+          {isAdmin && (
+            <span style={{
+              fontSize: "0.58rem", padding: "1px 6px",
+              background: "var(--accent-bg)",
+              border: "1px solid var(--accent-border)",
+              borderRadius: 999, color: "var(--accent)",
+              fontWeight: 700, letterSpacing: "0.05em",
+            }}>
+              admin
+            </span>
+          )}
+        </div>
 
-      {/* ── Mobile floating bottom nav bar ───────────────────── */}
-      <nav style={sidebarStyles.bottomNav} className="glass-card">
-        {/* Folders button */}
-        <button
-          style={sidebarStyles.bottomNavBtn}
-          onClick={() => setMobileSheetOpen((o) => !o)}
-        >
-          <svg viewBox="0 0 20 20" fill="none" width="20" height="20">
-            <path
-              d="M2 6a2 2 0 012-2h3.586a1 1 0 01.707.293L9.414 5.5A1 1 0 0010.121 5.5H16a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"
-              stroke="currentColor" strokeWidth="1.4"
-              fill="var(--folder-fill)"
-            />
-          </svg>
-          <span style={sidebarStyles.bottomNavLabel}>Folders</span>
-        </button>
-
-        {/* Upload */}
-        <button style={sidebarStyles.bottomNavBtn} onClick={onUpload}>
-          <UploadIcon />
-          <span style={sidebarStyles.bottomNavLabel}>Upload</span>
-        </button>
-
-        {/* New Folder */}
-        <button style={sidebarStyles.bottomNavBtn} onClick={onCreateFolder}>
-          <NewFolderIcon />
-          <span style={sidebarStyles.bottomNavLabel}>New Folder</span>
-        </button>
-
-        {/* Logout */}
-        <a href="/logout" style={{ textDecoration: "none" }}>
-          <button style={{ ...sidebarStyles.bottomNavBtn, color: "var(--error)" }}>
-            <LogoutIcon />
-            <span style={sidebarStyles.bottomNavLabel}>Sign out</span>
+        {/* Action capsule */}
+        <nav style={{
+          ...sidebarStyles.bottomNav,
+          position: "static",
+          transform: "none",
+          display: "flex",
+        }} className="glass-card">
+          <button style={sidebarStyles.bottomNavBtn} onClick={() => setMobileSheetOpen((o) => !o)}>
+            <svg viewBox="0 0 20 20" fill="none" width="20" height="20">
+              <path d="M2 6a2 2 0 012-2h3.586a1 1 0 01.707.293L9.414 5.5A1 1 0 0010.121 5.5H16a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" stroke="currentColor" strokeWidth="1.4" fill="var(--folder-fill)" />
+            </svg>
+            <span style={sidebarStyles.bottomNavLabel}>Folders</span>
           </button>
-        </a>
-      </nav>
 
-      {/* ── Mobile folder bottom sheet ────────────────────────── */}
+          <button style={sidebarStyles.bottomNavBtn} onClick={onUpload}>
+            <UploadIcon />
+            <span style={sidebarStyles.bottomNavLabel}>Upload</span>
+          </button>
+
+          <button style={sidebarStyles.bottomNavBtn} onClick={onCreateFolder}>
+            <NewFolderIcon />
+            <span style={sidebarStyles.bottomNavLabel}>New Folder</span>
+          </button>
+
+          <a href="/logout" style={{ textDecoration: "none" }}>
+            <button style={{ ...sidebarStyles.bottomNavBtn, color: "var(--error)" }}>
+              <LogoutIcon />
+              <span style={sidebarStyles.bottomNavLabel}>Sign out</span>
+            </button>
+          </a>
+        </nav>
+      </div>
+
+      {/* ── Mobile folder sheet — floats above bottom nav ── */}
       {mobileSheetOpen && (
         <>
           <div
             style={{ ...sidebarStyles.overlay, zIndex: 299 }}
             onClick={() => setMobileSheetOpen(false)}
           />
-          <div style={sidebarStyles.bottomSheet} className="glass-card">
-            <div style={sidebarStyles.sheetHandle} />
-            <div style={sidebarStyles.sheetHeader}>
-              <span style={{ fontSize: "0.9rem", fontWeight: 600, color: "var(--text-1)" }}>Folders</span>
-              <button style={sidebarStyles.closeBtn} onClick={() => setMobileSheetOpen(false)}>✕</button>
+          <div style={{
+            position: "fixed",
+            bottom: 130,          // sits above the nav stack (user capsule + action capsule)
+            left: "50%",
+            transform: "translateX(-50%)",
+            width: "calc(100vw - 40px)",
+            maxWidth: 320,
+            maxHeight: "45vh",
+            zIndex: 350,
+            borderRadius: 20,
+            display: "flex",
+            flexDirection: "column",
+            background: "var(--glass-bg)",
+            backdropFilter: "blur(var(--glass-blur)) saturate(180%)",
+            WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(180%)",
+            border: "1px solid var(--glass-border)",
+            boxShadow: "0 1px 0 var(--glass-shine) inset, 0 -8px 40px var(--glass-shadow)",
+            animation: "floatUp 0.25s cubic-bezier(0.34,1.56,0.64,1)",
+          }}>
+            {/* Handle */}
+            <div style={{
+              width: 32, height: 4, borderRadius: 2,
+              background: "var(--glass-border)",
+              margin: "10px auto 0", flexShrink: 0,
+            }} />
+
+            {/* Header */}
+            <div style={{
+              display: "flex", alignItems: "center",
+              justifyContent: "space-between",
+              padding: "8px 14px 6px",
+              borderBottom: "1px solid var(--glass-border)",
+              flexShrink: 0,
+            }}>
+              <span style={{ fontSize: "0.84rem", fontWeight: 600, color: "var(--text-1)" }}>
+                Folders
+              </span>
+              <button
+                onClick={() => setMobileSheetOpen(false)}
+                style={{
+                  width: 24, height: 24, borderRadius: 7,
+                  background: "var(--glass-bg)",
+                  border: "1px solid var(--glass-border)",
+                  color: "var(--text-3)", cursor: "pointer",
+                  fontSize: "0.7rem",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >✕</button>
             </div>
-            <div style={sidebarStyles.sheetScroll}>
+
+            {/* Scrollable folder list */}
+            <div style={{ overflowY: "auto", padding: "6px 0 12px", flex: 1 }}>
               <button
                 style={{
                   ...nodeStyles.btn,
                   color: currentPath === "" ? "var(--accent)" : "var(--text-2)",
                   background: currentPath === "" ? "var(--accent-bg)" : "transparent",
+                  borderLeft: currentPath === "" ? "2px solid var(--accent)" : "2px solid transparent",
                 }}
                 onClick={() => { onNavigate(""); setMobileSheetOpen(false); }}
               >
@@ -592,17 +720,11 @@ const sidebarStyles = {
 
   /* ── Bottom nav (mobile only) ── */
   bottomNav: {
-    position: "fixed",
-    bottom: 16,
-    left: "50%",
-    transform: "translateX(-50%)",
     display: "flex",
     alignItems: "center",
     gap: 0,
     padding: "8px 12px",
     borderRadius: 999,
-    zIndex: 250,
-    // Shown only on mobile (width < 768) — see <style> injected in JSX below
     width: "auto",
   },
   bottomNavBtn: {
