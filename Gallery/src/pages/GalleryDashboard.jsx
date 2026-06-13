@@ -1273,28 +1273,18 @@ const { user, isAdmin } = useAuth();
             </button>
           </div>
         )}
-        {/* ── Path label ───────────────────────────────────── */}
+        {/* ── Back button + path — only inside a folder ── */}
         {currentPath && (
-          <div style={{ padding: "10px 0 0", display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: "0.75rem", color: "var(--text-3)", fontWeight: 500 }}>
-              /{currentPath}
-            </span>
+          <div style={gs.topBar}>
+            <button style={gs.backBtn} onClick={goUp}>
+              <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                <path d="M13 5l-5 5 5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Back
+            </button>
+            <span style={gs.pathLabel}>/{currentPath}</span>
           </div>
         )}
-
-        {/* ── Desktop toolbar: Upload + New Folder ── */}
-        <div style={gs.desktopToolbar} className="desktop-toolbar">
-          <button style={gs.uploadBtn} onClick={() => fileInputRef.current?.click()}>
-            <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
-              <path d="M10 13V4M6 7l4-4 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M3 14v2a1 1 0 001 1h12a1 1 0 001-1v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-            Upload
-          </button>
-          <button style={gs.newFolderBtn} onClick={() => setShowCreateFolder(true)}>
-            + New Folder
-          </button>
-        </div>
 
         {/* ── Random Photos Widget — home screen only, non-admin ── */}
         {currentPath === "" && !isAdmin && (
@@ -1507,7 +1497,7 @@ const FolderOpenIcon = () => (
 const gs = {
   mainContent: {
     marginLeft: 268,
-    padding: "0 12px 32px",
+    padding: "16px 16px 32px",   // was "0 12px 32px"
     minHeight: "100dvh",
     transition: "margin-left 0.3s",
   },
@@ -1605,7 +1595,7 @@ const gs = {
     position: "relative",
     background: "var(--glass-bg)",
     border: "1px solid var(--glass-border)",
-    borderRadius: 14, padding: "14px 12px",
+    borderRadius: 12, justifyContent: "center", aspectRatio: "1",
     cursor: "pointer",
     transition: "transform 0.18s, box-shadow 0.18s",
     display: "flex", flexDirection: "column",
