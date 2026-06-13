@@ -266,18 +266,11 @@ function SidebarContent({
 
 /* ── Main Sidebar export ───────────────────────────────── */
 export default function Sidebar({
-  user,
-  isAdmin,
-  folderTree = [],
-  currentPath = "",
-  onNavigate,
-  isOpen,
-  onClose,
-  onUpload,
-  onCreateFolder,
-  onManageUsers,
-  onActivityLog,
-}) {
+  user, isAdmin, folderTree, currentPath,
+  onNavigate, isOpen, onClose,
+  onUpload, onCreateFolder, onManageUsers, onActivityLog,
+  onBgContextMenu,   
+}){
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
 
@@ -318,7 +311,15 @@ export default function Sidebar({
         }
       `}</style>
       {/* ── Desktop floating sidebar (always visible ≥768px) ── */}
-      <aside style={sidebarStyles.desktopSidebar} className="glass-card mv-desktop-sidebar">
+      <aside
+        style={sidebarStyles.desktopSidebar}
+        className="glass-card mv-desktop-sidebar"
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onBgContextMenu?.(e.clientX, e.clientY);
+        }}
+      >
         <SidebarContent
           user={user} isAdmin={isAdmin} folderTree={folderTree}
           currentPath={currentPath} onNavigate={onNavigate}

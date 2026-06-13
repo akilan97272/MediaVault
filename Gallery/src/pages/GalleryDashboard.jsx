@@ -194,7 +194,7 @@ function FolderCard({ name, onClick, onContextMenu, selected }) {
         ...(selected ? gs.folderCardSelected : {}),
       }}
       onClick={onClick}
-      onContextMenu={(e) => { e.preventDefault(); onContextMenu(e.clientX, e.clientY); }}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(e.clientX, e.clientY); }}
       onTouchStart={startLongPress}
       onTouchEnd={cancelLongPress}
       onTouchMove={cancelLongPress}
@@ -248,7 +248,7 @@ function MediaCard({ src, filename, isVideo, selected, onLightbox, onContextMenu
         if (didLongPress.current) { didLongPress.current = false; return; }
         onLightbox();
       }}
-      onContextMenu={(e) => { e.preventDefault(); onContextMenu(e.clientX, e.clientY); }}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(e.clientX, e.clientY); }}
       onTouchStart={startLongPress}
       onTouchEnd={cancelLongPress}
       onTouchMove={cancelLongPress}
@@ -853,6 +853,7 @@ export default function GalleryDashboard() {
   const [showActivityLog,  setShowActivityLog]  = useState(false);
   // Context menu state
   const [ctxMenu, setCtxMenu] = useState(null);
+  const [bgCtxMenu, setBgCtxMenu] = useState(null); // { x, y }
   // { x, y, items: [] }
   // Move modal
   const [moveTarget, setMoveTarget] = useState(null);
@@ -1194,22 +1195,32 @@ const { user, isAdmin } = useAuth();
       {/* ── Mobile sidebar overlay ──────────────────────── */}
       {sidebarOpen && (
         <div className="sidebar-mobile">
-          <Sidebar
-            user={user} isAdmin={isAdmin}
-            folderTree={folderTree} currentPath={currentPath}
-            onNavigate={(p) => { navigate(p); setSidebarOpen(false); }}
-            isOpen={sidebarOpen}
-            onClose={() => setSidebarOpen(false)}
-            onUpload={() => { fileInputRef.current?.click(); setSidebarOpen(false); }}
-            onCreateFolder={() => { setShowCreateFolder(true); setSidebarOpen(false); }}
-            onManageUsers={() => { setShowUserManager(true); setSidebarOpen(false); }}
-            onActivityLog={() => { setShowActivityLog(true); setSidebarOpen(false); }}
-          />
+        <Sidebar
+          user={user} isAdmin={isAdmin}
+          folderTree={folderTree} currentPath={currentPath}
+          onNavigate={navigate} isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          onUpload={() => fileInputRef.current?.click()}
+          onCreateFolder={() => setShowCreateFolder(true)}
+          onManageUsers={() => setShowUserManager(true)}
+          onActivityLog={() => setShowActivityLog(true)}
+          onBgContextMenu={(x, y) => setBgCtxMenu({ x, y })}  
+        />
         </div>
       )}
 
       {/* ── Main content ────────────────────────────────── */}
-      <div className="main-content" style={gs.mainContent}>
+      <div
+        className="main-content"
+        style={gs.mainContent}
+        onContextMenu={(e) => {
+          // Only fire if the click landed directly on the background, not on a card
+          if (e.target === e.currentTarget || e.currentTarget.contains(e.target)) {
+            e.preventDefault();
+            setBgCtxMenu({ x: e.clientX, y: e.clientY });
+          }
+        }}
+      >
 
         {/* Mobile capsule topbar (component handles its own show/hide) */}
         <TopBar
@@ -1448,6 +1459,35 @@ const { user, isAdmin } = useAuth();
       )}
       {showUserManager && <UserManagerModal onClose={() => setShowUserManager(false)} />}
       {showActivityLog  && <ActivityLogModal onClose={() => setShowActivityLog(false)} />}
+      {bgCtxMenu && (
+        <ContextMenu
+          x={bgCtxMenu.x}
+          y={bgCtxMenu.y}
+          onClose={() => setBgCtxMenu(null)}
+          items={[
+            {
+              label: "Upload Photo",
+              icon: (
+                <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                  <path d="M10 13V3M6 7l4-4 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M3 15v1a1 1 0 001 1h12a1 1 0 001-1v-1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              ),
+              action: () => fileInputRef.current?.click(),
+            },
+            {
+              label: "New Folder",
+              icon: (
+                <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                  <path d="M2 6a2 2 0 012-2h3.586a1 1 0 01.707.293L9.414 5.5H16a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" stroke="currentColor" strokeWidth="1.3" />
+                  <path d="M10 9v4M8 11h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                </svg>
+              ),
+              action: () => setShowCreateFolder(true),
+            },
+          ]}
+        />
+      )}
     </BaseLayout>
   );
 }
