@@ -1,8 +1,6 @@
-// pages/AdminDashboard.jsx
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import BaseLayout from "../components/BaseLayout";
 import { useTheme } from "../context/ThemeContext";
-
 const HINT_KEY = "mv-theme-hint-seen";
 
 function fmtSize(b) {
@@ -89,21 +87,42 @@ function ActivityItem({ event }) {
 }
 
 /* ── Mobile Capsule TopBar ─────────────────────────────── */
+const ADMIN_HINT_KEY = "mv-admin-hint-seen";
+
 function AdminTopBar() {
   const { toggleTheme } = useTheme();
   const [showHint, setShowHint] = useState(false);
+  const longPressTimer = useRef(null);
+
+  // Import useRef at top of file if not already:
+  // import { useState, useEffect, useCallback, useRef } from "react";
 
   useEffect(() => {
-    if (!localStorage.getItem(HINT_KEY)) {
-      const t = setTimeout(() => setShowHint(true), 900);
+    if (!localStorage.getItem(ADMIN_HINT_KEY)) {
+      const t = setTimeout(() => setShowHint(true), 800);
       return () => clearTimeout(t);
     }
   }, []);
 
+  function dismissHint() {
+    localStorage.setItem(ADMIN_HINT_KEY, "1");
+    setShowHint(false);
+  }
+
   function handleClick() {
     toggleTheme();
-    localStorage.setItem(HINT_KEY, "1");
-    setShowHint(false);
+    dismissHint();
+  }
+
+  function startLongPress() {
+    longPressTimer.current = setTimeout(() => {
+      navigator.vibrate?.(40);
+      window.location.href = "/gallery";
+    }, 600);
+  }
+
+  function cancelLongPress() {
+    clearTimeout(longPressTimer.current);
   }
 
   return (
@@ -151,19 +170,20 @@ function AdminTopBar() {
         }
         .adm-hint-bubble {
           position: absolute;
-          top: calc(100% + 6px); left: 50%;
+          top: calc(100% + 8px); left: 50%;
           transform: translateX(-50%);
           background: var(--glass-bg);
           backdrop-filter: blur(14px);
           border: 1px solid var(--glass-border);
-          border-radius: 10px;
-          padding: 7px 14px;
+          border-radius: 12px;
+          padding: 10px 16px;
           font-size: 0.74rem;
           color: var(--text-2);
           white-space: nowrap;
           box-shadow: 0 8px 24px var(--glass-shadow);
           pointer-events: none;
           z-index: 10;
+          line-height: 1.7;
           animation: admHintIn 0.3s ease;
         }
         @keyframes admHintIn {
@@ -172,10 +192,25 @@ function AdminTopBar() {
         }
       `}</style>
       <div className="adm-topbar-mobile">
-        <button className="adm-capsule" onClick={handleClick} aria-label="Toggle theme">
+        <button
+          className="adm-capsule"
+          onClick={handleClick}
+          onTouchStart={startLongPress}
+          onTouchEnd={cancelLongPress}
+          onTouchMove={cancelLongPress}
+          onMouseDown={startLongPress}
+          onMouseUp={cancelLongPress}
+          onMouseLeave={cancelLongPress}
+          aria-label="Toggle theme / long press for gallery"
+        >
           <span className="adm-capsule-name">MediaVault · Admin</span>
         </button>
-        {showHint && <div className="adm-hint-bubble">✦ Tap to switch light / dark</div>}
+        {showHint && (
+          <div className="adm-hint-bubble">
+            ✦ Tap to switch light / dark<br />
+            ✦ Hold to return to Gallery
+          </div>
+        )}
       </div>
     </>
   );

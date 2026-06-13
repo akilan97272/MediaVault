@@ -3,6 +3,7 @@ import re
 import json
 import shutil
 import contextlib
+import random
 import threading
 from contextlib import asynccontextmanager
 
@@ -837,3 +838,33 @@ def me(request: Request):
     if not user:
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
     return {"username": user, "is_admin": user == "admin"}
+
+@app.get("/api/random-photos")
+async def random_photos(request: Request, count: int = 20):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+    count = max(1, min(count, 50))
+    all_images = []
+
+    # Walk the user's own media folder
+    user_dir = secure_path(user)
+    if os.path.isdir(user_dir):
+        for root, _, fnames in os.walk(user_dir):
+            for f in fnames:
+                if re.search(r'\.(jpg|jpeg|png|gif|webp)$', f, re.IGNORECASE):
+                    rel = os.path.relpath(os.path.join(root, f), MEDIA_DIR)
+                    all_images.append(f"/media/{rel.replace(os.sep, '/')}")
+
+    # Also include shared folder images if it exists
+    shared_dir = secure_path("shared")
+    if os.path.isdir(shared_dir):
+        for root, _, fnames in os.walk(shared_dir):
+            for f in fnames:
+                if re.search(r'\.(jpg|jpeg|png|gif|webp)$', f, re.IGNORECASE):
+                    rel = os.path.relpath(os.path.join(root, f), MEDIA_DIR)
+                    all_images.append(f"/media/{rel.replace(os.sep, '/')}")
+
+    random.shuffle(all_images)
+    return all_images[:count]

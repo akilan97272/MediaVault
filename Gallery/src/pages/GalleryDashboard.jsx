@@ -277,44 +277,151 @@ function MediaCard({ src, filename, isVideo, selected, onLightbox, onContextMenu
 }
 
 /* ── Lightbox ────────────────────────────────────────────── */
-function Lightbox({ files, index, onClose, onPrev, onNext }) {
+const SLIDESHOW_SPEEDS = [10, 15, 20, 25, 30];
+
+function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, setSlideshowInterval }) {
   const file = files[index];
+  const [playing, setPlaying] = useState(false);
+  const [showSpeedPicker, setShowSpeedPicker] = useState(false);
+  const timerRef = useRef(null);
+
   if (!file) return null;
   const isVideo = /\.(mp4|webm|mkv)$/i.test(file);
 
+  // Keyboard nav
   useEffect(() => {
     const handler = (e) => {
-      if (e.key === "ArrowLeft")  onPrev();
-      if (e.key === "ArrowRight") onNext();
-      if (e.key === "Escape")     onClose();
+      if (e.key === "ArrowLeft")  { onPrev(); }
+      if (e.key === "ArrowRight") { onNext(); }
+      if (e.key === "Escape")     { setPlaying(false); onClose(); }
+      if (e.key === " ")          { e.preventDefault(); setPlaying((p) => !p); }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose, onPrev, onNext]);
 
+  // Slideshow auto-advance
+  useEffect(() => {
+    clearInterval(timerRef.current);
+    if (playing) {
+      timerRef.current = setInterval(() => {
+        onNext();
+      }, slideshowInterval * 1000);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [playing, slideshowInterval, onNext]);
+
+  // Stop slideshow when closed
+  useEffect(() => () => { clearInterval(timerRef.current); }, []);
+
+  // Image-only files for slideshow (skip videos)
+  const imageFiles = files.filter((f) => !/\.(mp4|webm|mkv)$/i.test(f));
+
   return (
-    <div style={lb.overlay} onClick={onClose}>
-      <button style={lb.closeBtn} onClick={onClose}>✕</button>
+    <div style={lb.overlay} onClick={() => { setPlaying(false); onClose(); }}>
+
+      {/* ── Top-right buttons ── */}
+      <div style={lb.topRight} onClick={(e) => e.stopPropagation()}>
+        {/* Download */}
+        <a href={file} download style={lb.iconBtn} title="Download">
+          <svg viewBox="0 0 20 20" fill="none" width="15" height="15">
+            <path d="M10 3v10M6 9l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M3 15v1a1 1 0 001 1h12a1 1 0 001-1v-1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </a>
+
+        {/* Slideshow toggle — images only */}
+        {!isVideo && (
+          <button
+            style={{ ...lb.iconBtn, background: playing ? "rgba(99,185,255,0.3)" : "rgba(255,255,255,0.1)", border: playing ? "1px solid var(--accent)" : "none" }}
+            onClick={() => setPlaying((p) => !p)}
+            title={playing ? "Pause slideshow (Space)" : "Start slideshow (Space)"}
+          >
+            {playing ? (
+              <svg viewBox="0 0 20 20" fill="none" width="15" height="15">
+                <rect x="5" y="4" width="3" height="12" rx="1" fill="currentColor" />
+                <rect x="12" y="4" width="3" height="12" rx="1" fill="currentColor" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 20 20" fill="none" width="15" height="15">
+                <polygon points="5,3 17,10 5,17" fill="currentColor" />
+              </svg>
+            )}
+          </button>
+        )}
+
+        {/* Speed picker */}
+        {!isVideo && (
+          <div style={{ position: "relative" }}>
+            <button
+              style={lb.iconBtn}
+              onClick={() => setShowSpeedPicker((s) => !s)}
+              title="Slideshow speed"
+            >
+              <span style={{ fontSize: "0.7rem", fontWeight: 700, color: "#fff", letterSpacing: "-0.5px" }}>
+                {slideshowInterval}s
+              </span>
+            </button>
+            {showSpeedPicker && (
+              <div style={lb.speedPicker}>
+                <div style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.5)", padding: "6px 10px 4px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  Interval
+                </div>
+                {SLIDESHOW_SPEEDS.map((s) => (
+                  <button
+                    key={s}
+                    style={{
+                      ...lb.speedOption,
+                      background: s === slideshowInterval ? "rgba(99,185,255,0.2)" : "transparent",
+                      color: s === slideshowInterval ? "var(--accent)" : "#fff",
+                    }}
+                    onClick={() => { setSlideshowInterval(s); setShowSpeedPicker(false); setPlaying(true); }}
+                  >
+                    {s} sec
+                    {s === slideshowInterval && (
+                      <svg viewBox="0 0 16 16" fill="none" width="12" height="12" style={{ marginLeft: "auto" }}>
+                        <path d="M3 8l3 3 7-7" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Close */}
+        <button style={lb.iconBtn} onClick={() => { setPlaying(false); onClose(); }}>✕</button>
+      </div>
+
+      {/* Progress bar when slideshow playing */}
+      {playing && (
+        <div style={lb.progressTrack}>
+          <div
+            key={`${index}-${slideshowInterval}`}
+            style={{
+              ...lb.progressBar,
+              animation: `lbProgress ${slideshowInterval}s linear forwards`,
+            }}
+          />
+        </div>
+      )}
+
+      {/* Nav arrows */}
       <button style={{ ...lb.navBtn, left: 12 }} onClick={(e) => { e.stopPropagation(); onPrev(); }}>‹</button>
       <button style={{ ...lb.navBtn, right: 12 }} onClick={(e) => { e.stopPropagation(); onNext(); }}>›</button>
-      {/* Download button in lightbox */}
-      <a
-        href={file}
-        download
-        onClick={(e) => e.stopPropagation()}
-        style={lb.downloadBtn}
-        title="Download"
-      >
-        <svg viewBox="0 0 20 20" fill="none" width="16" height="16">
-          <path d="M10 3v10M6 9l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M3 15v1a1 1 0 001 1h12a1 1 0 001-1v-1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      </a>
+
+      {/* Media */}
       <div style={lb.content} onClick={(e) => e.stopPropagation()}>
         {isVideo
           ? <video src={file} controls autoPlay style={lb.media} />
           : <img src={file} alt="" style={lb.media} />
         }
+      </div>
+
+      {/* Counter */}
+      <div style={lb.counter}>
+        {index + 1} / {files.length}
       </div>
     </div>
   );
@@ -323,24 +430,21 @@ function Lightbox({ files, index, onClose, onPrev, onNext }) {
 const lb = {
   overlay: {
     position: "fixed", inset: 0, zIndex: 500,
-    background: "rgba(0,0,0,0.92)", display: "flex",
+    background: "rgba(0,0,0,0.94)", display: "flex",
     alignItems: "center", justifyContent: "center",
   },
-  closeBtn: {
-    position: "absolute", top: 16, right: 16,
+  topRight: {
+    position: "absolute", top: 12, right: 12,
+    display: "flex", alignItems: "center", gap: 6,
+    zIndex: 10,
+  },
+  iconBtn: {
     width: 36, height: 36, borderRadius: "50%",
     background: "rgba(255,255,255,0.1)", border: "none",
     color: "#fff", cursor: "pointer", fontSize: "1rem",
     display: "flex", alignItems: "center", justifyContent: "center",
-    zIndex: 10,
-  },
-  downloadBtn: {
-    position: "absolute", top: 16, right: 60,
-    width: 36, height: 36, borderRadius: "50%",
-    background: "rgba(255,255,255,0.1)", border: "none",
-    color: "#fff", cursor: "pointer",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    zIndex: 10, textDecoration: "none",
+    transition: "background 0.15s",
+    textDecoration: "none",
   },
   navBtn: {
     position: "absolute", top: "50%", transform: "translateY(-50%)",
@@ -350,8 +454,40 @@ const lb = {
     display: "flex", alignItems: "center", justifyContent: "center",
     zIndex: 10,
   },
-  content: { maxWidth: "90vw", maxHeight: "90vh" },
-  media: { maxWidth: "90vw", maxHeight: "90vh", objectFit: "contain", borderRadius: 12 },
+  content: { maxWidth: "90vw", maxHeight: "85vh" },
+  media: { maxWidth: "90vw", maxHeight: "85vh", objectFit: "contain", borderRadius: 12 },
+  counter: {
+    position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)",
+    fontSize: "0.78rem", color: "rgba(255,255,255,0.5)", fontWeight: 500,
+    background: "rgba(0,0,0,0.4)", padding: "4px 12px", borderRadius: 999,
+  },
+  progressTrack: {
+    position: "absolute", top: 0, left: 0, right: 0, height: 2,
+    background: "rgba(255,255,255,0.1)", zIndex: 10,
+  },
+  progressBar: {
+    height: "100%",
+    background: "linear-gradient(90deg, var(--accent), rgba(160,80,255,0.9))",
+    borderRadius: 1,
+    width: "0%",
+  },
+  speedPicker: {
+    position: "absolute", top: "calc(100% + 8px)", right: 0,
+    background: "rgba(20,24,36,0.95)",
+    backdropFilter: "blur(20px)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: 12, minWidth: 120,
+    boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
+    overflow: "hidden",
+    zIndex: 20,
+  },
+  speedOption: {
+    width: "100%", display: "flex", alignItems: "center",
+    padding: "8px 10px", gap: 6,
+    border: "none", cursor: "pointer",
+    fontSize: "0.84rem", fontWeight: 500, fontFamily: "inherit",
+    transition: "background 0.12s",
+  },
 };
 
 /* ── Modal: Create Folder ────────────────────────────────── */
@@ -514,6 +650,192 @@ function ActivityLogModal({ onClose }) {
   );
 }
 
+/* ── Random Photos Widget ────────────────────────────────── */
+const RANDOM_COUNTS = [10, 20, 30, 40, 50];
+
+function RandomPhotosWidget({ photos, count, onCountChange, onRefresh, loading, onPhotoClick }) {
+  return (
+    <div style={rw.wrap} className="glass-card">
+      {/* Header */}
+      <div style={rw.header}>
+        <div style={rw.titleRow}>
+          <svg viewBox="0 0 20 20" fill="none" width="15" height="15" style={{ color: "var(--accent)", flexShrink: 0 }}>
+            <path d="M3 5a2 2 0 012-2h10a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V5z" stroke="currentColor" strokeWidth="1.3" />
+            <path d="M3 13l4-4 3 3 2-2 5 5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="7.5" cy="7.5" r="1.2" fill="currentColor" />
+          </svg>
+          <span style={rw.title}>Random Picks</span>
+        </div>
+
+        <div style={rw.controls}>
+          {/* Count selector pills */}
+          <div style={rw.pills}>
+            {RANDOM_COUNTS.map((n) => (
+              <button
+                key={n}
+                style={{
+                  ...rw.pill,
+                  background: n === count ? "var(--accent-bg)" : "transparent",
+                  border: n === count ? "1px solid var(--accent-border)" : "1px solid var(--glass-border)",
+                  color: n === count ? "var(--accent)" : "var(--text-3)",
+                  fontWeight: n === count ? 700 : 500,
+                }}
+                onClick={() => onCountChange(n)}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+
+          {/* Refresh */}
+          <button style={rw.refreshBtn} onClick={onRefresh} title="Shuffle" disabled={loading}>
+            <svg
+              viewBox="0 0 20 20" fill="none" width="13" height="13"
+              style={{ animation: loading ? "rwSpin 0.7s linear infinite" : "none" }}
+            >
+              <path d="M4 4v5h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M16 16v-5h-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M4.93 9A7 7 0 0115.07 11M15.07 11A7 7 0 014.93 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            Shuffle
+          </button>
+        </div>
+      </div>
+
+      {/* Grid */}
+      {loading && (
+        <div style={rw.loadingRow}>
+          <div className="loading-spinner" />
+          <span style={{ fontSize: "0.82rem", color: "var(--text-3)" }}>Loading…</span>
+        </div>
+      )}
+
+      {!loading && photos.length === 0 && (
+        <div style={rw.empty}>No photos found</div>
+      )}
+
+      {!loading && photos.length > 0 && (
+        <div style={rw.grid} className="rw-grid">
+          {photos.map((url, i) => (
+            <div
+              key={i}
+              style={rw.thumb}
+              className="rw-thumb"
+              onClick={() => onPhotoClick(i)}
+              title="Click to view"
+            >
+              <img
+                src={url}
+                loading="lazy"
+                decoding="async"
+                alt=""
+                style={rw.img}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const rw = {
+  wrap: {
+    borderRadius: 18,
+    overflow: "hidden",
+    marginBottom: 4,
+  },
+  header: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "12px 14px",
+    borderBottom: "1px solid var(--glass-border)",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  titleRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 7,
+    flexShrink: 0,
+  },
+  title: {
+    fontSize: "0.84rem",
+    fontWeight: 600,
+    color: "var(--text-1)",
+    letterSpacing: "0.02em",
+  },
+  controls: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  pills: {
+    display: "flex",
+    gap: 4,
+  },
+  pill: {
+    padding: "3px 9px",
+    borderRadius: 999,
+    cursor: "pointer",
+    fontSize: "0.72rem",
+    fontFamily: "inherit",
+    transition: "all 0.15s",
+  },
+  refreshBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    padding: "4px 10px",
+    background: "var(--glass-bg)",
+    border: "1px solid var(--glass-border)",
+    borderRadius: 8,
+    color: "var(--text-2)",
+    cursor: "pointer",
+    fontSize: "0.75rem",
+    fontFamily: "inherit",
+    fontWeight: 500,
+    transition: "background 0.15s",
+  },
+  loadingRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "20px 14px",
+    color: "var(--text-3)",
+  },
+  empty: {
+    padding: "24px 14px",
+    textAlign: "center",
+    color: "var(--text-3)",
+    fontSize: "0.84rem",
+  },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))",
+    gap: 6,
+    padding: 10,
+  },
+  thumb: {
+    aspectRatio: "1",
+    borderRadius: 10,
+    overflow: "hidden",
+    cursor: "pointer",
+    border: "1px solid var(--glass-border)",
+    transition: "transform 0.15s, box-shadow 0.15s",
+    background: "rgba(128,128,128,0.07)",
+  },
+  img: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    display: "block",
+    transition: "transform 0.2s",
+  },
+};
+
 /* ── Main GalleryDashboard ───────────────────────────────── */
 export default function GalleryDashboard() {
   const [currentPath, setCurrentPath] = useState("");
@@ -534,6 +856,12 @@ export default function GalleryDashboard() {
   // { x, y, items: [] }
   // Move modal
   const [moveTarget, setMoveTarget] = useState(null);
+  const [slideshow, setSlideshow]         = useState(false);
+  const [slideshowInterval, setSlideshowInterval] = useState(10); // seconds
+  const [randomPhotos, setRandomPhotos]       = useState([]);
+  const [randomCount, setRandomCount]         = useState(20);
+  const [randomLoading, setRandomLoading]     = useState(false);
+  const [randomLightbox, setRandomLightbox]   = useState(null); // index into randomPhotos
   // { filename, isFolder }
 
   const fileInputRef = useRef(null);
@@ -563,6 +891,20 @@ const { user, isAdmin } = useAuth();
       setLoading(false);
     }
   }, [currentPath]);
+  /* ── Load random photos ────────────────────────────────── */
+  const loadRandomPhotos = useCallback(async (count = randomCount) => {
+    if (isAdmin) return; 
+    setRandomLoading(true);
+    try {
+      const res = await fetch(`/api/random-photos?count=${count}`);
+      if (res.ok) setRandomPhotos(await res.json());
+    } catch (e) { console.error(e); }
+    finally { setRandomLoading(false); }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (currentPath === "" && !isAdmin) loadRandomPhotos(randomCount);
+  }, [currentPath, isAdmin]);
 
   useEffect(() => { loadMedia(currentPath); }, [currentPath]);
 
@@ -823,6 +1165,16 @@ const { user, isAdmin } = useAuth();
         /* select <option> dark mode fix */
         select option { background: #1a2235; color: #eee; }
         [data-theme="light"] select option { background: #fff; color: #111; }
+        @keyframes lbProgress {
+          from { width: 0%; }
+          to   { width: 100%; }
+        }
+          @keyframes rwSpin { to { transform: rotate(360deg); } }
+          .rw-thumb:hover { transform: scale(1.04); box-shadow: 0 4px 16px var(--glass-shadow); }
+          .rw-thumb:hover img { transform: scale(1.06); }
+          @media (max-width: 767px) {
+            .rw-grid { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)) !important; gap: 5px !important; padding: 8px !important; }
+          }
       `}</style>
 
       {/* ── Sidebar (desktop) ───────────────────────────── */}
@@ -944,8 +1296,21 @@ const { user, isAdmin } = useAuth();
           </button>
         </div>
 
+        {/* ── Random Photos Widget — home screen only, non-admin ── */}
+        {currentPath === "" && !isAdmin && (
+          <RandomPhotosWidget
+            photos={randomPhotos}
+            count={randomCount}
+            onCountChange={(n) => { setRandomCount(n); loadRandomPhotos(n); }}
+            onRefresh={() => loadRandomPhotos(randomCount)}
+            loading={randomLoading}
+            onPhotoClick={(i) => setRandomLightbox(i)}
+          />
+        )}
+
         {/* ── Media grid ───────────────────────────────── */}
         <main style={gs.grid}>
+
           {loading && (
             <div style={gs.loadingState}>
               <div className="loading-spinner" />
@@ -1039,6 +1404,21 @@ const { user, isAdmin } = useAuth();
           onClose={() => setLightboxIndex(null)}
           onPrev={() => setLightboxIndex((i) => (i - 1 + lightboxUrls.length) % lightboxUrls.length)}
           onNext={() => setLightboxIndex((i) => (i + 1) % lightboxUrls.length)}
+          slideshowInterval={slideshowInterval}
+          setSlideshowInterval={setSlideshowInterval}
+        />
+      )}
+
+      {/* ── Random photos lightbox ───────────────────── */}
+      {randomLightbox !== null && (
+        <Lightbox
+          files={randomPhotos}
+          index={randomLightbox}
+          onClose={() => setRandomLightbox(null)}
+          onPrev={() => setRandomLightbox((i) => (i - 1 + randomPhotos.length) % randomPhotos.length)}
+          onNext={() => setRandomLightbox((i) => (i + 1) % randomPhotos.length)}
+          slideshowInterval={slideshowInterval}
+          setSlideshowInterval={setSlideshowInterval}
         />
       )}
 
@@ -1288,4 +1668,5 @@ const gs = {
     background: "var(--accent-bg)", border: "1px solid var(--accent-border)",
     color: "var(--accent)", fontWeight: 700,
   },
+  
 };
