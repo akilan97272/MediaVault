@@ -1,27 +1,30 @@
 # MediaVault
 
-A self-hosted private media gallery with per-user folders and shared space.
+A self-hosted private media gallery with per-user folders, shared space, and an admin dashboard.
 
 ---
 
 ## Features
 
-- **Private galleries** — each user sees only their own folder and the shared folder
-- **Shared folder** — visible to all users; upload anything others can browse
-
-- **Self-registration** — new users can create an account from the login screen; their personal folder is created automatically
-- **Admin user management** — create or remove users from the gallery panel
-- **Folder tree** — nested folders with sidebar navigation
-- **Lightbox** — full-screen image/video viewer with pinch-to-zoom, drag-to-pan, keyboard navigation
-- **Multi-file upload** — select multiple files at once; progress indicator on the upload button
-- **Right-click to delete** — right-click any file or folder in the grid to remove it
+- **Private galleries** — each user can only see their own folder and the shared folder
+- **Shared folder** — a common space visible and accessible to all users
+- **Self-registration** — new users can create an account from the login screen; a personal folder is created automatically
+- **Folder navigation** — nested folders with sidebar tree navigation and breadcrumb path
+- **Lightbox viewer** — full-screen image and video viewer with keyboard navigation and slideshow support
+- **Multi-file upload** — select multiple files at once with live progress feedback
+- **Pagination** — gallery is paginated with file and folder count shown per page
+- **Multi-select** — right-click (desktop) or long-press (mobile) to select items; supports delete, move, and download
+- **Activity log** — admin can view login activity including device and IP information
+- **Admin dashboard** — overview of users, storage usage, and recent uploads
+- **Dark and light mode** — liquid glass UI with persistent theme preference
+- **File renamer worker** — background worker that renames uploaded files to a consistent format
 
 ---
 
 ## Project Structure
 
 ```
-gallery_app/
+MediaVault/
 ├── main.py
 ├── users.json
 ├── activity_log.json
@@ -34,47 +37,69 @@ gallery_app/
 │   ├── shared/
 │   └── <username>/
 │
-├── static/
-│   ├── style.css
-│   └── script.js
+├── workerFiles/
+│   ├── file_renamer.py
+│   └── file_renamer_scheduler.py
 │
-├── templates/
-│   ├── login.html
-│   ├── gallery.html
-│   ├── admin.html
-│   └── 404.html
-│
-└── workerFiles/
-    ├── file_renamer.py
-    └── file_renamer_scheduler.py
+└── Gallery/                         ← React frontend (Vite)
+    ├── index.html
+    ├── vite.config.js
+    ├── package.json
+    └── src/
+        ├── main.jsx
+        ├── App.jsx
+        ├── App.css
+        ├── index.css
+        │
+        ├── context/
+        │   ├── AuthContext.jsx
+        │   └── ThemeContext.jsx
+        │
+        ├── components/
+        │   ├── BaseLayout.jsx
+        │   ├── Sidebar.jsx
+        │   └── TopBar.jsx
+        │
+        └── pages/
+            ├── Login.jsx
+            ├── GalleryDashboard.jsx
+            ├── AdminDashboard.jsx
+            └── NotFound.jsx
 ```
 
 ---
 
 ## Setup
 
-### 1. Install dependencies
+### 1. Backend
 
 ```bash
-cd MediaVault
 python -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Configure (optional)
+### 2. Frontend
 
-Create a `.env` file to set a custom secret key:
-
+```bash
+cd Gallery
+npm install
+npm run build       # production build → dist/
 ```
-SECRET_KEY=replace-with-a-long-random-string
+
+Or for development with live reload:
+
+```bash
+npm run dev         # Vite dev server on :5173, proxies API to :8000
 ```
 
-### 3. Run
+
+### 3. Run the backend
 
 ```bash
 uvicorn main:app --reload
-uvicorn main:app --host 0.0.0.0 --port 8000 #for network visibility
+# or for network visibility:
+uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 Open [http://localhost:8000](http://localhost:8000)
@@ -83,11 +108,9 @@ Open [http://localhost:8000](http://localhost:8000)
 
 ## Default Login
 
-| Username | Password  |
-|----------|-----------|
+| Username | Password   |
+|----------|------------|
 | `admin`  | `admin123` |
-
-> Change the admin password via the **Manage Users** panel after first login.
 
 ---
 
@@ -100,7 +123,7 @@ Video:  `.mp4` `.webm` `.mkv`
 
 ## Notes
 
-- The `shared/` folder cannot be deleted by any user (protected at the API level).
+- The `shared/` folder is protected and cannot be deleted.
 - Usernames must be 3–30 characters, alphanumeric with `_` and `-` allowed.
 - Passwords must be at least 4 characters.
-- All passwords are stored as bcrypt hashes — plaintext is never saved.
+- All passwords are stored as bcrypt hashes.
