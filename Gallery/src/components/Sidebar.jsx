@@ -309,6 +309,16 @@ export default function Sidebar({
           from { transform: translateX(-50%) translateY(20px); opacity: 0; }
           to   { transform: translateX(-50%) translateY(0);    opacity: 1; }
         }
+        @keyframes expandFromMid {
+          from {
+            opacity: 0;
+            transform: translateX(-50%) scaleY(0.3) translateY(50%);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(-50%) scaleY(1) translateY(0%);
+          }
+        }
       `}</style>
       {/* ── Desktop floating sidebar (always visible ≥768px) ── */}
       <aside
@@ -371,130 +381,92 @@ export default function Sidebar({
         }}
         className="mv-bottom-nav"
       >
-        {/* User name capsule — clickable for admin to expand options */}
-        {(() => {
-          const [adminMenuOpen, setAdminMenuOpen] = useState(false);
-          return (
+      {/* User name capsule — clickable for admin to expand options */}
+      <div style={{ position: "relative" }}>
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 7,
+            padding: "5px 14px",
+            background: "var(--glass-bg)",
+            backdropFilter: "blur(var(--glass-blur)) saturate(180%)",
+            WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(180%)",
+            border: "1px solid var(--glass-border)",
+            borderRadius: 999,
+            boxShadow: "0 1px 0 var(--glass-shine) inset, 0 4px 16px var(--glass-shadow)",
+            cursor: isAdmin ? "pointer" : "default",
+            WebkitTapHighlightColor: "transparent",
+            position: "relative",
+            zIndex: 2,
+          }}
+          onClick={() => isAdmin && setAdminMenuOpen((o) => !o)}
+        >
+          <div style={{
+            width: 18, height: 18, borderRadius: "50%",
+            background: "var(--accent-bg)",
+            border: "1px solid var(--accent-border)",
+            color: "var(--accent)",
+            fontSize: "0.65rem", fontWeight: 700,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0,
+          }}>
+            {user?.[0]?.toUpperCase()}
+          </div>
+          <span style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text-1)", letterSpacing: "0.01em" }}>
+            {user}
+          </span>
+          {isAdmin && (
             <>
-              <div
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 7,
-                  padding: "5px 14px",
-                  background: "var(--glass-bg)",
-                  backdropFilter: "blur(var(--glass-blur)) saturate(180%)",
-                  WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(180%)",
-                  border: "1px solid var(--glass-border)",
-                  borderRadius: 999,
-                  boxShadow: "0 1px 0 var(--glass-shine) inset, 0 4px 16px var(--glass-shadow)",
-                  cursor: isAdmin ? "pointer" : "default",
-                  WebkitTapHighlightColor: "transparent",
-                }}
-                onClick={() => isAdmin && setAdminMenuOpen((o) => !o)}
-              >
-                <div style={{
-                  width: 18, height: 18, borderRadius: "50%",
-                  background: "var(--accent-bg)",
-                  border: "1px solid var(--accent-border)",
-                  color: "var(--accent)",
-                  fontSize: "0.65rem", fontWeight: 700,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  flexShrink: 0,
-                }}>
-                  {user?.[0]?.toUpperCase()}
-                </div>
-                <span style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text-1)", letterSpacing: "0.01em" }}>
-                  {user}
-                </span>
-                {isAdmin && (
-                  <>
-                    <span style={{
-                      fontSize: "0.58rem", padding: "1px 6px",
-                      background: "var(--accent-bg)",
-                      border: "1px solid var(--accent-border)",
-                      borderRadius: 999, color: "var(--accent)",
-                      fontWeight: 700, letterSpacing: "0.05em",
-                    }}>admin</span>
-                    <span style={{
-                      fontSize: "0.7rem", color: "var(--text-3)",
-                      transform: adminMenuOpen ? "rotate(180deg)" : "rotate(0deg)",
-                      transition: "transform 0.2s",
-                      lineHeight: 1,
-                    }}>▾</span>
-                  </>
-                )}
-              </div>
-
-              {/* Admin options — float above, push username up */}
-              {isAdmin && adminMenuOpen && (
-                <div style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 6,
-                  animation: "floatUp 0.2s cubic-bezier(0.34,1.56,0.64,1)",
-                }}>
-                  <a href="/admin" style={{ textDecoration: "none" }}>
-                    <button style={{
-                      width: "100%",
-                      display: "flex", alignItems: "center", gap: 8,
-                      padding: "9px 14px",
-                      background: "var(--glass-bg)",
-                      backdropFilter: "blur(var(--glass-blur))",
-                      WebkitBackdropFilter: "blur(var(--glass-blur))",
-                      border: "1px solid var(--glass-border)",
-                      borderRadius: 12,
-                      color: "var(--text-1)", cursor: "pointer",
-                      fontFamily: "inherit", fontSize: "0.82rem", fontWeight: 500,
-                      boxShadow: "0 1px 0 var(--glass-shine) inset, 0 4px 16px var(--glass-shadow)",
-                    }}>
-                      <DashIcon />
-                      Admin Dashboard
-                    </button>
-                  </a>
-                  <button
-                    style={{
-                      width: "100%",
-                      display: "flex", alignItems: "center", gap: 8,
-                      padding: "9px 14px",
-                      background: "var(--glass-bg)",
-                      backdropFilter: "blur(var(--glass-blur))",
-                      WebkitBackdropFilter: "blur(var(--glass-blur))",
-                      border: "1px solid var(--glass-border)",
-                      borderRadius: 12,
-                      color: "var(--text-1)", cursor: "pointer",
-                      fontFamily: "inherit", fontSize: "0.82rem", fontWeight: 500,
-                      boxShadow: "0 1px 0 var(--glass-shine) inset, 0 4px 16px var(--glass-shadow)",
-                    }}
-                    onClick={() => { onManageUsers?.(); setAdminMenuOpen(false); }}
-                  >
-                    <UsersIcon />
-                    Manage Users
-                  </button>
-                  <button
-                    style={{
-                      width: "100%",
-                      display: "flex", alignItems: "center", gap: 8,
-                      padding: "9px 14px",
-                      background: "var(--glass-bg)",
-                      backdropFilter: "blur(var(--glass-blur))",
-                      WebkitBackdropFilter: "blur(var(--glass-blur))",
-                      border: "1px solid var(--glass-border)",
-                      borderRadius: 12,
-                      color: "var(--text-1)", cursor: "pointer",
-                      fontFamily: "inherit", fontSize: "0.82rem", fontWeight: 500,
-                      boxShadow: "0 1px 0 var(--glass-shine) inset, 0 4px 16px var(--glass-shadow)",
-                    }}
-                    onClick={() => { onActivityLog?.(); setAdminMenuOpen(false); }}
-                  >
-                    <ActivityIcon />
-                    Activity Log
-                  </button>
-                </div>
-              )}
+              <span style={{
+                fontSize: "0.58rem", padding: "1px 6px",
+                background: "var(--accent-bg)",
+                border: "1px solid var(--accent-border)",
+                borderRadius: 999, color: "var(--accent)",
+                fontWeight: 700, letterSpacing: "0.05em",
+              }}>admin</span>
+              <span style={{
+                fontSize: "0.7rem", color: "var(--text-3)",
+                transform: adminMenuOpen ? "rotate(180deg)" : "rotate(0deg)",
+                transition: "transform 0.2s",
+                lineHeight: 1,
+              }}>▾</span>
             </>
-          );
-        })()}
+          )}
+        </div>
+
+        {/* Admin options — overlay, expands from the midpoint between the two capsules */}
+        {isAdmin && adminMenuOpen && (
+          <div style={{
+            position: "absolute",
+            bottom: "calc(100% + 4px)",   // sits just above the user capsule
+            left: "50%",
+            transform: "translateX(-50%)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            width: 180,
+            zIndex: 1,
+            transformOrigin: "bottom center",
+            animation: "expandFromMid 0.22s cubic-bezier(0.34,1.56,0.64,1)",
+          }}>
+            <a href="/admin" style={{ textDecoration: "none" }}>
+              <button style={sidebarStyles.adminMenuBtn}>
+                <DashIcon />
+                Admin Dashboard
+              </button>
+            </a>
+            <button style={sidebarStyles.adminMenuBtn} onClick={() => { onManageUsers?.(); setAdminMenuOpen(false); }}>
+              <UsersIcon />
+              Manage Users
+            </button>
+            <button style={sidebarStyles.adminMenuBtn} onClick={() => { onActivityLog?.(); setAdminMenuOpen(false); }}>
+              <ActivityIcon />
+              Activity Log
+            </button>
+          </div>
+        )}
+      </div>
 
         {/* Action capsule */}
         <nav style={{
@@ -863,4 +835,17 @@ const sidebarStyles = {
     padding: "8px 0 24px",
     flex: 1,
   },
+  adminMenuBtn: {
+  width: "100%",
+  display: "flex", alignItems: "center", gap: 8,
+  padding: "9px 14px",
+  background: "var(--glass-bg)",
+  backdropFilter: "blur(var(--glass-blur))",
+  WebkitBackdropFilter: "blur(var(--glass-blur))",
+  border: "1px solid var(--glass-border)",
+  borderRadius: 12,
+  color: "var(--text-1)", cursor: "pointer",
+  fontFamily: "inherit", fontSize: "0.82rem", fontWeight: 500,
+  boxShadow: "0 1px 0 var(--glass-shine) inset, 0 4px 16px var(--glass-shadow)",
+},
 };

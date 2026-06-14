@@ -536,18 +536,34 @@ function CreateFolderModal({ currentPath, onClose, onCreated }) {
   );
 }
 
-/* ── Modal: User Manager ─────────────────────────────────── */
-function UserManagerModal({ onClose }) {
-  const [users, setUsers] = useState([]);
-  const [newUser, setNewUser] = useState("");
-  const [newPass, setNewPass] = useState("");
-  const [msg, setMsg] = useState({ type: "", text: "" });
+//  ─ Modal: User Manager ───────────────────────────────────── */
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-  useEffect(() => { loadUsers(); }, []);
+function UserManagerModal({ onClose }) {
+  const [users, setUsers]               = useState([]);
+  const [restrictions, setRestrictions] = useState({}); // { username: {enabled, allowed_days} }
+  const [newUser, setNewUser]           = useState("");
+  const [newPass, setNewPass]           = useState("");
+  const [msg, setMsg]                   = useState({ type: "", text: "" });
+  const [savingUser, setSavingUser]     = useState(null); // username currently saving
+
+  useEffect(() => { loadUsers(); loadRestrictions(); }, []);
 
   async function loadUsers() {
     const res = await fetch("/api/users");
-    if (res.ok) setUsers(await res.json());
+    if (res.ok) {
+      const d = await res.json();
+      setUsers(Array.isArray(d) ? d : (d.users || []));
+    }
+  }
+
+  async function loadRestrictions() {
+    const res = await fetch("/api/restrictions");
+    if (res.ok) {
+      const d = await res.json();
+      // Expecting { username: { enabled, allowed_days } }
+      setRestrictions(d.restrictions || d || {});
+    }
   }
 
   async function createUser() {
@@ -571,16 +587,73 @@ function UserManagerModal({ onClose }) {
     loadUsers();
   }
 
+  function getRestriction(username) {
+    return restrictions[username] || { enabled: false, allowed_days: [] };
+  }
+
+  async function saveRestriction(username, next) {
+    setSavingUser(username);
+    setRestrictions((prev) => ({ ...prev, [username]: next }));
+    try {
+      const res = await fetch(`/api/restrictions/${username}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(next),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setMsg({ type: "error", text: d.error || "Failed to update restriction" });
+        loadRestrictions(); // revert on failure
+      }
+    } catch {
+      setMsg({ type: "error", text: "Network error updating restriction" });
+      loadRestrictions();
+    } finally {
+      setSavingUser(null);
+    }
+  }
+
+  function toggleEnabled(username) {
+    const cur = getRestriction(username);
+    saveRestriction(username, { ...cur, enabled: !cur.enabled });
+  }
+
+  function toggleDay(username, dayIdx) {
+    const cur = getRestriction(username);
+    const has = cur.allowed_days.includes(dayIdx);
+    const allowed_days = has
+      ? cur.allowed_days.filter((d) => d !== dayIdx)
+      : [...cur.allowed_days, dayIdx].sort();
+    saveRestriction(username, { ...cur, allowed_days });
+  }
+
+  async function clearRestriction(username) {
+    setSavingUser(username);
+    try {
+      const res = await fetch(`/api/restrictions/${username}`, { method: "DELETE" });
+      if (res.ok) {
+        setRestrictions((prev) => {
+          const next = { ...prev };
+          delete next[username];
+          return next;
+        });
+      }
+    } finally {
+      setSavingUser(null);
+    }
+  }
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="glass-modal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+      <div className="glass-modal" style={{ maxWidth: 600 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>Manage Users</h2>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
+          {/* Add user */}
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <h3 style={{ fontSize: "0.86rem", fontWeight: 600, color: "var(--text-1)" }}>Add New User</h3>
+            <h3 style={um.sectionTitle}>Add New User</h3>
             {msg.text && <div className={msg.type === "error" ? "error-pill" : "success-pill"}>{msg.text}</div>}
             <div style={{ display: "flex", gap: 8 }}>
               <input className="glass-input" placeholder="Username" value={newUser} onChange={(e) => setNewUser(e.target.value)} style={{ flex: 1 }} />
@@ -588,14 +661,88 @@ function UserManagerModal({ onClose }) {
               <button className="glass-btn-accent" onClick={createUser}>Add</button>
             </div>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <h3 style={{ fontSize: "0.86rem", fontWeight: 600, color: "var(--text-1)" }}>Existing Users</h3>
-            {users.filter(u => u !== "admin").map((u) => (
-              <div key={u} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", borderRadius: 10, background: "var(--glass-bg)", border: "1px solid var(--glass-border)" }}>
-                <span style={{ fontSize: "0.9rem", fontWeight: 500, color: "var(--text-1)" }}>{u}</span>
-                <button onClick={() => deleteUser(u)} style={{ background: "rgba(255,107,107,0.1)", border: "1px solid rgba(255,107,107,0.3)", borderRadius: 8, padding: "5px 10px", color: "var(--error)", cursor: "pointer", fontSize: "0.78rem", fontWeight: 600 }}>Delete</button>
-              </div>
-            ))}
+
+          {/* Existing users */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <h3 style={um.sectionTitle}>Existing Users</h3>
+            {users.filter(u => u !== "admin").length === 0 && (
+              <p style={{ fontSize: "0.82rem", color: "var(--text-3)", textAlign: "center", padding: "12px 0" }}>
+                No users yet
+              </p>
+            )}
+            {users.filter(u => u !== "admin").map((u) => {
+              const r = getRestriction(u);
+              const saving = savingUser === u;
+              return (
+                <div key={u} style={um.userCard}>
+                  {/* Top row: name + delete */}
+                  <div style={um.userTopRow}>
+                    <div style={um.userNameWrap}>
+                      <div style={um.avatar}>{u[0]?.toUpperCase()}</div>
+                      <span style={um.userName}>{u}</span>
+                    </div>
+                    <button onClick={() => deleteUser(u)} style={um.deleteBtn}>
+                      <svg viewBox="0 0 20 20" fill="none" width="13" height="13">
+                        <path d="M5 6h10M8 6V4h4v2M7 9v6M10 9v6M13 9v6M6 6l.75 10h6.5L14 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      Delete
+                    </button>
+                  </div>
+
+                  {/* Restriction toggle */}
+                  <div style={um.restrictionRow}>
+                    <button
+                      style={{
+                        ...um.toggle,
+                        background: r.enabled ? "var(--accent)" : "rgba(128,128,128,0.18)",
+                      }}
+                      onClick={() => toggleEnabled(u)}
+                      disabled={saving}
+                      title={r.enabled ? "Disable access restriction" : "Enable access restriction"}
+                    >
+                      <span style={{
+                        ...um.toggleKnob,
+                        transform: r.enabled ? "translateX(16px)" : "translateX(0px)",
+                      }} />
+                    </button>
+                    <span style={um.restrictionLabel}>
+                      {r.enabled ? "Restricted access — allowed on:" : "No access restriction"}
+                    </span>
+                    {r.enabled && r.allowed_days.length > 0 && (
+                      <button style={um.clearBtn} onClick={() => clearRestriction(u)} disabled={saving}>
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Day picker — only when enabled */}
+                  {r.enabled && (
+                    <div style={um.dayRow}>
+                      {WEEKDAYS.map((label, idx) => {
+                        const active = r.allowed_days.includes(idx);
+                        return (
+                          <button
+                            key={idx}
+                            style={{
+                              ...um.dayChip,
+                              background: active ? "var(--accent-bg)" : "transparent",
+                              border: active ? "1px solid var(--accent-border)" : "1px solid var(--glass-border)",
+                              color: active ? "var(--accent)" : "var(--text-3)",
+                              fontWeight: active ? 700 : 500,
+                              opacity: saving ? 0.6 : 1,
+                            }}
+                            onClick={() => toggleDay(u, idx)}
+                            disabled={saving}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -603,17 +750,99 @@ function UserManagerModal({ onClose }) {
   );
 }
 
+/* ── User Manager Styles ─────────────────────────────────── */
+const um = {
+  sectionTitle: { fontSize: "0.86rem", fontWeight: 600, color: "var(--text-1)" },
+  userCard: {
+    display: "flex", flexDirection: "column", gap: 10,
+    padding: "12px 14px", borderRadius: 14,
+    background: "var(--glass-bg)",
+    border: "1px solid var(--glass-border)",
+  },
+  userTopRow: {
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+  },
+  userNameWrap: {
+    display: "flex", alignItems: "center", gap: 9,
+  },
+  avatar: {
+    width: 26, height: 26, borderRadius: "50%",
+    background: "var(--accent-bg)", border: "1px solid var(--accent-border)",
+    color: "var(--accent)", fontSize: "0.7rem", fontWeight: 700,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    flexShrink: 0,
+  },
+  userName: { fontSize: "0.9rem", fontWeight: 600, color: "var(--text-1)" },
+  deleteBtn: {
+    display: "flex", alignItems: "center", gap: 5,
+    background: "rgba(255,107,107,0.1)",
+    border: "1px solid rgba(255,107,107,0.3)",
+    borderRadius: 8, padding: "5px 10px",
+    color: "var(--error)", cursor: "pointer",
+    fontSize: "0.76rem", fontWeight: 600, fontFamily: "inherit",
+  },
+  restrictionRow: {
+    display: "flex", alignItems: "center", gap: 10,
+    paddingTop: 8, borderTop: "1px solid var(--glass-border)",
+    flexWrap: "wrap",
+  },
+  toggle: {
+    width: 34, height: 18, borderRadius: 999,
+    border: "none", cursor: "pointer", position: "relative",
+    padding: 0, transition: "background 0.2s", flexShrink: 0,
+  },
+  toggleKnob: {
+    position: "absolute", top: 2, left: 2,
+    width: 14, height: 14, borderRadius: "50%",
+    background: "#fff",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+    transition: "transform 0.2s",
+  },
+  restrictionLabel: {
+    fontSize: "0.78rem", color: "var(--text-2)", fontWeight: 500, flex: 1,
+  },
+  clearBtn: {
+    background: "transparent",
+    border: "1px solid var(--glass-border)",
+    borderRadius: 8, padding: "3px 10px",
+    color: "var(--text-3)", cursor: "pointer",
+    fontSize: "0.72rem", fontWeight: 600, fontFamily: "inherit",
+  },
+  dayRow: {
+    display: "flex", gap: 6, flexWrap: "wrap",
+    paddingTop: 4,
+  },
+  dayChip: {
+    padding: "5px 12px", borderRadius: 999,
+    cursor: "pointer", fontSize: "0.76rem", fontFamily: "inherit",
+    transition: "all 0.15s",
+  },
+};
+
 /* ── Modal: Activity Log ─────────────────────────────────── */
 function ActivityLogModal({ onClose }) {
   const [activity, setActivity] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/activity")
-      .then((r) => r.json())
-      .then((d) => setActivity(d.activity || []))
-      .finally(() => setLoading(false));
-  }, []);
+      fetch("/api/activity-log")
+        .then((r) => r.json())
+        .then((d) => {
+          // API returns { activities: [...] } — map to the shape ActivityLogModal renders
+          const raw = d.activities || d.activity || [];
+          setActivity(raw.map((e) => ({
+            ts:     (e.timestamp || e.ts || "").replace("T", " ").slice(0, 19),
+            user:   e.username   || e.user   || "—",
+            ip:     e.ip_address || e.ip     || "—",
+            device: e.device_info
+              ? `${e.device_info.browser || ""} · ${e.device_info.os || ""} · ${e.device_info.device_type || ""}`
+              : (e.device || "—"),
+            action: e.success === false ? "failed" : (e.action || "login"),
+          })));
+        })
+        .catch((err) => console.error("[ActivityLogModal]", err))
+        .finally(() => setLoading(false));
+    }, []);
 
   function timeAgo(ts) {
     const s = Math.floor((Date.now() - new Date(ts)) / 1000);
@@ -636,12 +865,25 @@ function ActivityLogModal({ onClose }) {
           {!loading && activity.length === 0 && <p style={{ color: "var(--text-3)", fontSize: "0.86rem", textAlign: "center", padding: 24 }}>No activity recorded yet</p>}
           {activity.map((a, i) => (
             <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 0", borderBottom: "1px solid var(--glass-border)" }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: a.success ? "#4dd9ac" : "var(--error)", marginTop: 5, flexShrink: 0, boxShadow: `0 0 6px ${a.success ? "rgba(77,217,172,0.5)" : "rgba(255,107,107,0.5)"}` }} />
+              <div style={{
+                width: 8, height: 8, borderRadius: "50%",
+                background: a.action === "failed" ? "var(--error)" : "#4dd9ac",
+                marginTop: 5, flexShrink: 0,
+                boxShadow: `0 0 6px ${a.action === "failed" ? "rgba(255,107,107,0.5)" : "rgba(77,217,172,0.5)"}`,
+              }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: "0.84rem", fontWeight: 600, color: "var(--text-1)" }}>{a.username} <span style={{ fontWeight: 400, color: "var(--text-3)" }}>logged {a.success ? "in" : "failed"}</span></div>
-                <div style={{ fontSize: "0.74rem", color: "var(--text-3)", marginTop: 2, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{a.device_info?.os} · {a.device_info?.browser} · {a.ip_address}</div>
+                <div style={{ fontSize: "0.84rem", fontWeight: 600, color: "var(--text-1)" }}>
+                  {a.user} <span style={{ fontWeight: 400, color: "var(--text-3)" }}>
+                    {a.action === "failed" ? "failed to log in" : `logged in (${a.action})`}
+                  </span>
+                </div>
+                <div style={{ fontSize: "0.74rem", color: "var(--text-3)", marginTop: 2, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                  {a.device} · {a.ip}
+                </div>
               </div>
-              <div style={{ fontSize: "0.72rem", color: "var(--text-3)", whiteSpace: "nowrap", flexShrink: 0, marginTop: 2 }}>{timeAgo(a.timestamp)}</div>
+              <div style={{ fontSize: "0.72rem", color: "var(--text-3)", whiteSpace: "nowrap", flexShrink: 0, marginTop: 2 }}>
+                {timeAgo(a.ts)}
+              </div>
             </div>
           ))}
         </div>

@@ -270,7 +270,7 @@ app = FastAPI(
     openapi_url=None,
 )
 app.mount("/media",  StaticFiles(directory=MEDIA_DIR), name="media")
-app.mount("/static", StaticFiles(directory="static"),  name="static")
+# app.mount("/static", StaticFiles(directory="static"),  name="static")
 if os.path.isdir(os.path.join(DIST_DIR, "assets")):
     app.mount("/assets", StaticFiles(directory=os.path.join(DIST_DIR, "assets")), name="assets")
 app.add_middleware(
