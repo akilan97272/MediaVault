@@ -250,6 +250,76 @@ def load_activity() -> list:
         })
     return result
 
+import json, threading
+
+_INDEX_PATH = os.path.join(os.path.dirname(__file__), "media_index.json")
+_index_lock = threading.Lock()
+
+def _load_index() -> dict:
+    """{ "username/folder/sub": ["username/folder/sub/fname_001.jpg", ...] }"""
+    try:
+        with open(_INDEX_PATH, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def _save_index(idx: dict):
+    with open(_INDEX_PATH, "w") as f:
+        json.dump(idx, f, indent=2)
+
+def _next_counter(target_dir: str, folder_name: str) -> int:
+    """Find next available counter by scanning existing files in that dir."""
+    pattern = re.compile(rf"^{re.escape(folder_name)}_(\d+)\.", re.IGNORECASE)
+    max_n = 0
+    if os.path.isdir(target_dir):
+        for fn in os.listdir(target_dir):
+            m = pattern.match(fn)
+            if m:
+                max_n = max(max_n, int(m.group(1)))
+    return max_n + 1
+
+def _add_to_index(rel_path: str):
+    """Add a file's relative path (from MEDIA_DIR) to the index."""
+    folder_key = "/".join(rel_path.split("/")[:-1])  # everything except filename
+    with _index_lock:
+        idx = _load_index()
+        idx.setdefault(folder_key, [])
+        if rel_path not in idx[folder_key]:
+            idx[folder_key].append(rel_path)
+        _save_index(idx)
+
+def _remove_from_index(rel_path: str):
+    """Remove a file or all entries under a folder prefix from the index."""
+    with _index_lock:
+        idx = _load_index()
+        # Remove exact file match
+        for key in list(idx.keys()):
+            idx[key] = [p for p in idx[key] if not p.startswith(rel_path)]
+            if not idx[key]:
+                del idx[key]
+        _save_index(idx)
+
+def _bootstrap_index():
+    """Scan MEDIA_DIR and index any files not already in the index."""
+    if not os.path.isdir(MEDIA_DIR):
+        return
+    IMAGE_EXT = re.compile(r'\.(jpg|jpeg|png|gif|webp|mp4|webm|mkv)$', re.IGNORECASE)
+    with _index_lock:
+        idx = _load_index()
+        changed = False
+        for root, _, fnames in os.walk(MEDIA_DIR):
+            for fn in fnames:
+                if not IMAGE_EXT.search(fn):
+                    continue
+                abs_path = os.path.join(root, fn)
+                rel      = os.path.relpath(abs_path, MEDIA_DIR).replace(os.sep, "/")
+                key      = "/".join(rel.split("/")[:-1])
+                idx.setdefault(key, [])
+                if rel not in idx[key]:
+                    idx[key].append(rel)
+                    changed = True
+        if changed:
+            _save_index(idx)
 
 # ── App bootstrap ─────────────────────────────────────────────────────────────
 @asynccontextmanager
@@ -262,6 +332,8 @@ async def lifespan(_app: FastAPI):
     except FileNotFoundError:
         pass  # dev mode — Vite serves the frontend directly
     start_scheduler()
+    # Build index for any existing files not yet indexed
+    _bootstrap_index()
     yield
     stop_scheduler()
 
@@ -714,7 +786,6 @@ async def upload_media(request: Request,
 
     fname  = (file.filename or "").strip()
     flower = fname.lower()
-
     if not flower.endswith(_ALLOWED_EXT):
         mime = (file.content_type or "").split(";")[0].strip().lower()
         if mime not in _ALLOWED_MIME:
@@ -725,9 +796,20 @@ async def upload_media(request: Request,
     if not os.path.isdir(target_dir):
         raise HTTPException(status_code=404, detail="Target folder does not exist")
 
-    filename  = os.path.basename(fname) or "upload"
-    file_path = os.path.join(target_dir, filename)
+    # ── Rename on upload ──────────────────────────────────────
+    _, ext       = os.path.splitext(fname)
+    folder_name  = os.path.basename(target_dir)   # e.g. "MagicW" or "subfolder"
+    counter      = _next_counter(target_dir, folder_name)
+    new_filename = f"{folder_name}_{counter:03d}{ext.lower()}"
+    file_path    = os.path.join(target_dir, new_filename)
 
+    # Avoid collision (race condition safety)
+    while os.path.exists(file_path):
+        counter += 1
+        new_filename = f"{folder_name}_{counter:03d}{ext.lower()}"
+        file_path    = os.path.join(target_dir, new_filename)
+
+    # ── Write file ────────────────────────────────────────────
     try:
         with open(file_path, "wb") as buf:
             while True:
@@ -740,7 +822,11 @@ async def upload_media(request: Request,
             os.remove(file_path)
         raise HTTPException(status_code=500, detail="Failed to save file")
 
-    return {"filename": filename, "status": "success"}
+    # ── Update index ──────────────────────────────────────────
+    rel = os.path.relpath(file_path, MEDIA_DIR).replace(os.sep, "/")
+    _add_to_index(rel)
+
+    return {"filename": new_filename, "status": "success"}
 
 
 @app.delete("/api/media")
@@ -764,6 +850,9 @@ def delete_media(request: Request, path: str = "", filename: str = ""):
 
     try:
         shutil.rmtree(target) if os.path.isdir(target) else os.remove(target)
+        # Remove from index
+        rel = os.path.relpath(target, MEDIA_DIR).replace(os.sep, "/")
+        _remove_from_index(rel)
     except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -824,6 +913,11 @@ async def move_media(request: Request):
 
     try:
         shutil.move(src_abs, dest_file)
+        # Update index: remove old path, add new path
+        old_rel = os.path.relpath(src_abs,  MEDIA_DIR).replace(os.sep, "/")
+        new_rel = os.path.relpath(dest_file, MEDIA_DIR).replace(os.sep, "/")
+        _remove_from_index(old_rel)
+        _add_to_index(new_rel)
     except OSError as exc:
         return JSONResponse(status_code=500, content={"error": str(exc)})
 
@@ -850,63 +944,36 @@ def me(request: Request):
     return {"username": user, "is_admin": user == "admin"}
 
 @app.get("/api/random-photos")
-async def random_photos(request: Request, count: int = 20):
+async def random_photos(
+    request: Request,
+    count: int = 20,
+    folders: list[str] = Query(default=[])
+):
     user = get_current_user(request)
     if not user:
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
 
-    count = max(1, min(count, 50))
-    all_images = []
+    count = max(1, min(count, 200))
 
-    # Walk the user's own media folder
-    user_dir = secure_path(user)
-    if os.path.isdir(user_dir):
-        for root, _, fnames in os.walk(user_dir):
-            for f in fnames:
-                if re.search(r'\.(jpg|jpeg|png|gif|webp)$', f, re.IGNORECASE):
-                    rel = os.path.relpath(os.path.join(root, f), MEDIA_DIR)
-                    all_images.append(f"/media/{rel.replace(os.sep, '/')}")
+    with _index_lock:
+        idx = _load_index()
 
-    # Also include shared folder images if it exists
-    shared_dir = secure_path("shared")
-    if os.path.isdir(shared_dir):
-        for root, _, fnames in os.walk(shared_dir):
-            for f in fnames:
-                if re.search(r'\.(jpg|jpeg|png|gif|webp)$', f, re.IGNORECASE):
-                    rel = os.path.relpath(os.path.join(root, f), MEDIA_DIR)
-                    all_images.append(f"/media/{rel.replace(os.sep, '/')}")
+    IMAGE_EXT = re.compile(r'\.(jpg|jpeg|png|gif|webp)$', re.IGNORECASE)
 
-    random.shuffle(all_images)
-    return all_images[:count]
-
-@app.get("/api/random-photos")
-async def random_photos(request: Request, count: int = 20, folders: list[str] = Query(default=[])):
-    user = get_current_user(request)
-    if not user:
-        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
-
-    count = max(1, min(count, 50))
-    all_images = []
-
-    search_roots = []
     if folders:
-        for f in folders:
-            if can_access_path(user, f):
-                search_roots.append(secure_path(f))
+        # Only paths that start with one of the selected folder keys
+        # AND belong to this user or shared
+        pool = []
+        for folder_key, paths in idx.items():
+            if any(folder_key == f or folder_key.startswith(f + "/") for f in folders):
+                if can_access_path(user, folder_key):
+                    pool.extend(p for p in paths if IMAGE_EXT.search(p))
     else:
-        search_roots.append(secure_path(user))
-        shared_dir = secure_path("shared")
-        if os.path.isdir(shared_dir):
-            search_roots.append(shared_dir)
+        # All files accessible to this user
+        pool = []
+        for folder_key, paths in idx.items():
+            if can_access_path(user, folder_key):
+                pool.extend(p for p in paths if IMAGE_EXT.search(p))
 
-    for root_dir in search_roots:
-        if not os.path.isdir(root_dir):
-            continue
-        for root, _, fnames in os.walk(root_dir):
-            for f in fnames:
-                if re.search(r'\.(jpg|jpeg|png|gif|webp)$', f, re.IGNORECASE):
-                    rel = os.path.relpath(os.path.join(root, f), MEDIA_DIR)
-                    all_images.append(f"/media/{rel.replace(os.sep, '/')}")
-
-    random.shuffle(all_images)
-    return all_images[:count]
+    random.shuffle(pool)
+    return [f"/media/{p}" for p in pool[:count]]
