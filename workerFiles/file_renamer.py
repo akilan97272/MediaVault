@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import datetime
 
 # Configuration
-MEDIA_DIR = os.path.join(os.path.dirname(__file__), "media")
+MEDIA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "media")
 ALLOWED_EXTENSIONS = {
     '.jpg', '.jpeg', '.png', '.gif',      # Images
     '.mp4', '.webm', '.mkv',              # Videos
@@ -131,30 +131,29 @@ def rename_files_in_folder(folder_path: str, folder_name: str, dry_run: bool = F
         
         # ===== Handle WEBP Conversion =====
         if ext.lower() == '.webp':
-            if not dry_run:
+            if dry_run:
+                results["converted"].append({
+                    "old": filename,
+                    "new": os.path.splitext(filename)[0] + '.jpg',
+                    "message": "Would convert"
+                })
+                # still fall through to rename step below (using original name for dry run)
+            else:
                 success, msg = convert_webp_to_jpg(file_path)
                 if success:
-                    # Get the new filename after conversion
                     new_filename = os.path.splitext(filename)[0] + '.jpg'
                     results["converted"].append({
                         "old": filename,
                         "new": new_filename,
                         "message": msg
                     })
+                    # Update file_path and ext so rename step uses the new .jpg file
+                    filename  = new_filename
                     file_path = os.path.join(folder_path, new_filename)
-                    ext = '.jpg'
+                    ext       = '.jpg'
                 else:
                     results["errors"].append(f"Failed to convert {filename}: {msg}")
-                    continue
-            else:
-                # Dry run - just show what would happen
-                new_filename = os.path.splitext(filename)[0] + '.jpg'
-                results["converted"].append({
-                    "old": filename,
-                    "new": new_filename,
-                    "message": "Would convert"
-                })
-                continue
+                    continue  # genuinely failed — skip rename
         
         # ===== Handle File Renaming =====
         # Skip if already in renamed format (e.g., Aki_001.jpg)

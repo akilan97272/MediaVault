@@ -3,7 +3,7 @@ import threading
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-
+from datetime import datetime, timedelta
 from workerFiles.file_renamer import process_all_users, print_results
 
 # Setup logging
@@ -33,7 +33,8 @@ def start_scheduler():
                 IntervalTrigger(hours=2),
                 id='file_renaming_task',
                 name='File Renaming Task (every 2 hours)',
-                replace_existing=True
+                replace_existing=True,
+                next_run_time=datetime.now() + timedelta(seconds=10),  # run 10s after startup
             )
             
             _scheduler.start()
