@@ -624,6 +624,50 @@ def delete_user(username: str, request: Request):
     save_users(new)
     return {"status": "deleted"}
 
+# ── Password management ───────────────────────────────────────────────────────
+
+@app.put("/api/users/{username}/password")
+async def change_password_admin(username: str, request: Request):
+    """Admin changes any user's password."""
+    if get_current_user(request) != "admin":
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    users = load_users()
+    if username not in users:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    try:
+        body     = await request.json()
+        new_pass = (body.get("password") or "").strip()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Invalid body"})
+    if len(new_pass) < 4:
+        return JSONResponse(status_code=400, content={"error": "Password must be at least 4 characters"})
+    new = dict(users)
+    new[username] = pwd_context.hash(new_pass)
+    save_users(new)
+    return {"status": "updated", "username": username}
+
+
+@app.put("/api/me/password")
+async def change_own_password(request: Request):
+    """Logged-in user changes their own password."""
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    try:
+        body         = await request.json()
+        current_pass = (body.get("current_password") or "").strip()
+        new_pass     = (body.get("new_password")     or "").strip()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Invalid body"})
+    users = load_users()
+    if not pwd_context.verify(current_pass, users[user]):
+        return JSONResponse(status_code=401, content={"error": "Current password is incorrect"})
+    if len(new_pass) < 4:
+        return JSONResponse(status_code=400, content={"error": "New password must be at least 4 characters"})
+    new = dict(users)
+    new[user] = pwd_context.hash(new_pass)
+    save_users(new)
+    return {"status": "updated"}
 
 # ── Activity Log API (admin only) ─────────────────────────────────────────────
 
@@ -679,9 +723,19 @@ def list_media(request: Request, path: str = ""):
     user = get_current_user(request)
     if not user:
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
-    restricted = day_restricted_response(user)
-    if restricted:
-        return restricted
+
+    day_restricted = not is_allowed_today(user)
+
+    # If restricted AND they're trying to open a subfolder → block it
+    if day_restricted and path:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error":    "restricted",
+                "message":  "This area is off-limits for today. Please come back when the gates are open! 🔒",
+            },
+        )
+
     if not can_access_path(user, path):
         return JSONResponse(status_code=403, content={"error": "Access denied"})
 
@@ -697,8 +751,7 @@ def list_media(request: Request, path: str = ""):
     except OSError:
         return {"files": [], "folders": [], "current_path": path}
 
-    entries.sort(key=lambda e: (not e.is_dir(follow_symlinks=False),
-                                 -e.stat().st_mtime))
+    entries.sort(key=lambda e: (not e.is_dir(follow_symlinks=False), -e.stat().st_mtime))
 
     files: list   = []
     folders: list = []
@@ -708,9 +761,16 @@ def list_media(request: Request, path: str = ""):
                 continue
             folders.append(e.name)
         elif e.name.lower().endswith(_ALLOWED_EXT):
-            files.append(e.name)
+            # If restricted, only show files at root level (no path) — no files inside folders
+            if not day_restricted:
+                files.append(e.name)
 
-    return {"files": files, "folders": folders, "current_path": path}
+    return {
+        "files":        files,
+        "folders":      folders,
+        "current_path": path,
+        "day_restricted": day_restricted,
+    }
 
 
 @app.get("/api/tree")
@@ -718,11 +778,10 @@ def get_folder_tree(request: Request):
     user = get_current_user(request)
     if not user:
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
-    restricted = day_restricted_response(user)
-    if restricted:
-        return restricted
 
+    # Tree is always visible even when restricted (sidebar still shows folders)
     allowed = visible_top_folders(user)
+    day_restricted = not is_allowed_today(user)
 
     def build(directory: str, rel: str, depth: int) -> list:
         result = []
@@ -746,8 +805,7 @@ def get_folder_tree(request: Request):
             pass
         return result
 
-    return {"tree": build(MEDIA_DIR, "", 0)}
-
+    return {"tree": build(MEDIA_DIR, "", 0), "day_restricted": day_restricted}
 
 @app.post("/api/folder")
 def create_folder(request: Request,
