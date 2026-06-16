@@ -190,7 +190,6 @@ function SidebarContent({
           <BrandIcon />
           <span style={sidebarStyles.brandName}>MediaVault</span>
         </div>
-        <button style={sidebarStyles.closeBtn} onClick={onClose}>✕</button>
       </div>
 
       {/* Nav */}

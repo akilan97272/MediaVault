@@ -8,11 +8,13 @@ import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Form, File, UploadFile, HTTPException
+from fastapi.params import Query
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from itsdangerous import Signer
 from passlib.context import CryptContext
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.base import BaseHTTPMiddleware
 from dotenv import load_dotenv
 from datetime import datetime
 
@@ -269,6 +271,14 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+class LargeUploadMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        request._body_size_limit = 500 * 1024 * 1024  # 500 MB
+        return await call_next(request)
+
+app.add_middleware(LargeUploadMiddleware)
+
 app.mount("/media",  StaticFiles(directory=MEDIA_DIR), name="media")
 # app.mount("/static", StaticFiles(directory="static"),  name="static")
 if os.path.isdir(os.path.join(DIST_DIR, "assets")):
@@ -861,6 +871,38 @@ async def random_photos(request: Request, count: int = 20):
     shared_dir = secure_path("shared")
     if os.path.isdir(shared_dir):
         for root, _, fnames in os.walk(shared_dir):
+            for f in fnames:
+                if re.search(r'\.(jpg|jpeg|png|gif|webp)$', f, re.IGNORECASE):
+                    rel = os.path.relpath(os.path.join(root, f), MEDIA_DIR)
+                    all_images.append(f"/media/{rel.replace(os.sep, '/')}")
+
+    random.shuffle(all_images)
+    return all_images[:count]
+
+@app.get("/api/random-photos")
+async def random_photos(request: Request, count: int = 20, folders: list[str] = Query(default=[])):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+    count = max(1, min(count, 50))
+    all_images = []
+
+    search_roots = []
+    if folders:
+        for f in folders:
+            if can_access_path(user, f):
+                search_roots.append(secure_path(f))
+    else:
+        search_roots.append(secure_path(user))
+        shared_dir = secure_path("shared")
+        if os.path.isdir(shared_dir):
+            search_roots.append(shared_dir)
+
+    for root_dir in search_roots:
+        if not os.path.isdir(root_dir):
+            continue
+        for root, _, fnames in os.walk(root_dir):
             for f in fnames:
                 if re.search(r'\.(jpg|jpeg|png|gif|webp)$', f, re.IGNORECASE):
                     rel = os.path.relpath(os.path.join(root, f), MEDIA_DIR)
