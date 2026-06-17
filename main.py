@@ -65,10 +65,9 @@ _CHUNK = 256 * 1024
 DIST_DIR     = os.path.join(BASE_DIR, "dist")
 _index_html: str | None = None
 
-def _load_index() -> str:
+def _load_html_template() -> str:
     with open(os.path.join(DIST_DIR, "index.html"), encoding="utf-8") as f:
         return f.read()
-
 # ── User store ────────────────────────────────────────────────────────────────
 
 _users_cache: dict | None = None
@@ -255,7 +254,7 @@ import json, threading
 _INDEX_PATH = os.path.join(os.path.dirname(__file__), "media_index.json")
 _index_lock = threading.Lock()
 
-def _load_index() -> dict:
+def _load_media_index() -> dict:
     """{ "username/folder/sub": ["username/folder/sub/fname_001.jpg", ...] }"""
     try:
         with open(_INDEX_PATH, "r") as f:
@@ -282,7 +281,7 @@ def _add_to_index(rel_path: str):
     """Add a file's relative path (from MEDIA_DIR) to the index."""
     folder_key = "/".join(rel_path.split("/")[:-1])  # everything except filename
     with _index_lock:
-        idx = _load_index()
+        idx = _load_media_index()
         idx.setdefault(folder_key, [])
         if rel_path not in idx[folder_key]:
             idx[folder_key].append(rel_path)
@@ -291,7 +290,7 @@ def _add_to_index(rel_path: str):
 def _remove_from_index(rel_path: str):
     """Remove a file or all entries under a folder prefix from the index."""
     with _index_lock:
-        idx = _load_index()
+        idx = _load_media_index()
         # Remove exact file match
         for key in list(idx.keys()):
             idx[key] = [p for p in idx[key] if not p.startswith(rel_path)]
@@ -305,7 +304,7 @@ def _bootstrap_index():
         return
     IMAGE_EXT = re.compile(r'\.(jpg|jpeg|png|gif|webp|mp4|webm|mkv)$', re.IGNORECASE)
     with _index_lock:
-        idx = _load_index()
+        idx = _load_media_index()
         changed = False
         for root, _, fnames in os.walk(MEDIA_DIR):
             for fn in fnames:
@@ -328,7 +327,7 @@ async def lifespan(_app: FastAPI):
     load_restrictions()
     global _index_html
     try:
-        _index_html = _load_index()
+        _index_html = _load_html_template()
     except FileNotFoundError:
         pass  # dev mode — Vite serves the frontend directly
     start_scheduler()
@@ -985,7 +984,7 @@ async def move_media(request: Request):
 def page(page_key: str, status: int = 200, user: str | None = None) -> HTMLResponse:
     global _index_html
     if _index_html is None:
-        _index_html = _load_index()
+        _index_html = _load_html_template()
     import json as _json
     init = _json.dumps({"user": user, "is_admin": user == "admin"})
     injection = f'<script>window.__PAGE__="{page_key}";window.__INIT__={init};</script>\n'
@@ -1014,7 +1013,7 @@ async def random_photos(
     count = max(1, min(count, 200))
 
     with _index_lock:
-        idx = _load_index()
+        idx = _load_media_index()
 
     IMAGE_EXT = re.compile(r'\.(jpg|jpeg|png|gif|webp)$', re.IGNORECASE)
 
