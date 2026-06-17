@@ -1060,34 +1060,105 @@ function FolderPickerDropdown({ folderTree, selectedFolders, onChange, onClose, 
         top, left,
         width: W,
         zIndex: 9999,
-        background: "var(--glass-bg)",
+        background: "var(--bg-mid)",           // solid base, not just glass — ensures text contrast in both themes
         backdropFilter: "blur(24px) saturate(200%)",
         WebkitBackdropFilter: "blur(24px) saturate(200%)",
         border: "1px solid var(--glass-border)",
         borderRadius: 16,
-        maxHeight: 300,
-        overflow: "hidden",
         display: "flex",
         flexDirection: "column",
         boxShadow: "0 1px 0 var(--glass-shine) inset, 0 20px 60px rgba(0,0,0,0.45)",
+        overflow: "hidden",                     // clips border-radius cleanly
+        maxHeight: "min(300px, 60vh)",
       }}
     >
-      <div style={fp.header}>Photo source</div>
-      <div style={{ ...fp.list, overflowY: "auto" }}>
-        <button style={{ ...fp.item, ...(isAll ? fp.itemActive : {}) }} onClick={toggleAll}>
-          <span style={fp.checkbox}>{isAll && <CheckMark />}</span>
+      {/* Header — fixed, never scrolls */}
+      <div style={{
+        fontSize: "0.68rem", fontWeight: 700,
+        textTransform: "uppercase", letterSpacing: "0.08em",
+        color: "var(--text-1)",                // was text-3 — too faint
+        padding: "10px 14px 6px",
+        borderBottom: "1px solid var(--glass-border)",
+        flexShrink: 0,
+      }}>
+        Photo source
+      </div>
+
+      {/* Scrollable list — constrained inside the dropdown */}
+      <div style={{
+        overflowY: "auto",
+        overflowX: "hidden",
+        flex: 1,                               // takes remaining height after header
+        paddingBottom: 6,
+        // Custom scrollbar styling
+        scrollbarWidth: "thin",
+        scrollbarColor: "var(--glass-border) transparent",
+      }}>
+        {/* All folders option */}
+        <button
+          style={{
+            width: "100%", display: "flex", alignItems: "center", gap: 8,
+            padding: "8px 14px",
+            background: isAll ? "var(--accent-bg)" : "transparent",
+            border: "none", cursor: "pointer", textAlign: "left",
+            fontFamily: "inherit", fontSize: "0.84rem", fontWeight: 600,
+            color: isAll ? "var(--accent)" : "var(--text-1)",  // text-1 not text-2
+            transition: "background 0.12s",
+          }}
+          onClick={toggleAll}
+        >
+          <span style={{
+            width: 15, height: 15, borderRadius: 4, flexShrink: 0,
+            border: isAll ? "1.5px solid var(--accent)" : "1.5px solid var(--text-3)",
+            background: isAll ? "var(--accent-bg)" : "transparent",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            {isAll && <CheckMark />}
+          </span>
           All folders
         </button>
+
+        {/* Individual folders */}
         {allFolders.map((f) => {
           const active = !isAll && selectedFolders.includes(f.path);
           return (
             <button
               key={f.path}
-              style={{ ...fp.item, ...(active ? fp.itemActive : {}), paddingLeft: 12 + f.depth * 14 }}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 8,
+                padding: "7px 14px",
+                paddingLeft: 12 + f.depth * 14,
+                background: active ? "var(--accent-bg)" : "transparent",
+                border: "none", cursor: "pointer", textAlign: "left",
+                fontFamily: "inherit", fontSize: "0.82rem", fontWeight: active ? 600 : 400,
+                color: active ? "var(--accent)" : "var(--text-1)",  // always text-1
+                transition: "background 0.12s",
+                // Clip long names inside the box
+                overflow: "hidden",
+                whiteSpace: "nowrap",
+                textOverflow: "ellipsis",
+                maxWidth: "100%",
+              }}
               onClick={() => toggleFolder(f.path)}
             >
-              <span style={fp.checkbox}>{active && <CheckMark />}</span>
-              {f.name}
+              <span style={{
+                width: 15, height: 15, borderRadius: 4, flexShrink: 0,
+                border: active ? "1.5px solid var(--accent)" : "1.5px solid var(--text-3)",
+                background: active ? "var(--accent-bg)" : "transparent",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                minWidth: 15,
+              }}>
+                {active && <CheckMark />}
+              </span>
+              <span style={{
+                overflow: "hidden",
+                whiteSpace: "nowrap",
+                textOverflow: "ellipsis",
+                flex: 1,
+                minWidth: 0,
+              }}>
+                {f.name}
+              </span>
             </button>
           );
         })}
