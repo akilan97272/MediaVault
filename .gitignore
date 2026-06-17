@@ -7,3 +7,5 @@ activity_log.json
 FILE_RENAMER_README.md
 SCHEDULER_INTEGRATION.md
 media_index.json
+static/
+dist/
