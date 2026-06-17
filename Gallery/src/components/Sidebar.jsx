@@ -2,7 +2,7 @@
 // Desktop: floating glass sidebar with rounded edges (Apple-style)
 // Mobile: collapsible bottom sheet triggered by a floating nav bar
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTheme } from "../context/ThemeContext";
 
 /* ── Icons ─────────────────────────────────────────────── */
@@ -88,6 +88,159 @@ const LogoutIcon = () => (
     <path d="M13 14l3-4-3-4M16 10H8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+
+const KeyIcon = () => (
+  <svg viewBox="0 0 20 20" fill="none" width="15" height="15">
+    <circle cx="8" cy="10" r="4" stroke="currentColor" strokeWidth="1.4" />
+    <path d="M12 10h5M15 8v4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+  </svg>
+);
+
+/* ── Change Password Modal ─────────────────────────────── */
+function ChangePasswordModal({ onClose }) {
+  const [currentPass, setCurrentPass] = useState("");
+  const [newPass,     setNewPass]     = useState("");
+  const [confirmPass, setConfirmPass] = useState("");
+  const [loading,     setLoading]     = useState(false);
+  const [error,       setError]       = useState("");
+  const [success,     setSuccess]     = useState(false);
+
+  async function submit() {
+    setError("");
+    if (newPass.length < 4)          return setError("New password must be at least 4 characters");
+    if (newPass !== confirmPass)      return setError("Passwords don't match");
+    setLoading(true);
+    try {
+      const res = await fetch("/api/me/password", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current_password: currentPass, new_password: newPass }),
+      });
+      const data = await res.json();
+      if (!res.ok) return setError(data.error || "Failed to change password");
+      setSuccess(true);
+      setTimeout(onClose, 1400);
+    } catch { setError("Network error"); }
+    finally { setLoading(false); }
+  }
+
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 9000,
+        background: "rgba(0,0,0,0.55)",
+        backdropFilter: "blur(8px)",
+        WebkitBackdropFilter: "blur(8px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 16,
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%", maxWidth: 360,
+          background: "var(--glass-bg)",
+          backdropFilter: "blur(32px) saturate(200%)",
+          WebkitBackdropFilter: "blur(32px) saturate(200%)",
+          border: "1px solid var(--glass-border)",
+          borderRadius: 22,
+          boxShadow: "0 1px 0 var(--glass-shine) inset, 0 24px 80px rgba(0,0,0,0.5)",
+          overflow: "hidden",
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "16px 18px 14px",
+          borderBottom: "1px solid var(--glass-border)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <KeyIcon />
+            <span style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--text-1)" }}>
+              Change Password
+            </span>
+          </div>
+          <button onClick={onClose} style={{
+            width: 28, height: 28, borderRadius: 8,
+            background: "var(--glass-bg)", border: "1px solid var(--glass-border)",
+            color: "var(--text-3)", cursor: "pointer", fontSize: "0.75rem",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>✕</button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: "16px 18px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+          {success ? (
+            <div style={{
+              textAlign: "center", padding: "20px 0",
+              color: "var(--accent)", fontSize: "0.9rem", fontWeight: 600,
+            }}>
+              ✓ Password updated!
+            </div>
+          ) : (
+            <>
+              {error && (
+                <div style={{
+                  padding: "8px 12px", borderRadius: 10,
+                  background: "rgba(255,107,107,0.1)",
+                  border: "1px solid rgba(255,107,107,0.3)",
+                  color: "var(--error)", fontSize: "0.82rem",
+                }}>{error}</div>
+              )}
+              {[
+                { label: "Current Password", val: currentPass, set: setCurrentPass },
+                { label: "New Password",     val: newPass,     set: setNewPass },
+                { label: "Confirm New",      val: confirmPass, set: setConfirmPass },
+              ].map(({ label, val, set }) => (
+                <div key={label} style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  <label style={{ fontSize: "0.75rem", fontWeight: 600, color: "var(--text-3)", letterSpacing: "0.04em" }}>
+                    {label.toUpperCase()}
+                  </label>
+                  <input
+                    type="password"
+                    value={val}
+                    onChange={(e) => set(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && submit()}
+                    className="glass-input"
+                    style={{ fontSize: "0.88rem" }}
+                    placeholder="••••••••"
+                    autoComplete="new-password"
+                  />
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                <button
+                  onClick={onClose}
+                  style={{
+                    flex: 1, padding: "9px 0", borderRadius: 12,
+                    background: "transparent",
+                    border: "1px solid var(--glass-border)",
+                    color: "var(--text-2)", cursor: "pointer",
+                    fontFamily: "inherit", fontSize: "0.84rem", fontWeight: 600,
+                  }}
+                >Cancel</button>
+                <button
+                  onClick={submit}
+                  disabled={loading}
+                  style={{
+                    flex: 2, padding: "9px 0", borderRadius: 12,
+                    background: "var(--accent-bg)",
+                    border: "1px solid var(--accent-border)",
+                    color: "var(--accent)", cursor: loading ? "not-allowed" : "pointer",
+                    fontFamily: "inherit", fontSize: "0.84rem", fontWeight: 700,
+                    boxShadow: "0 2px 12px rgba(99,185,255,0.15)",
+                    opacity: loading ? 0.7 : 1,
+                  }}
+                >{loading ? "Saving…" : "Update Password"}</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* ── Tree node (recursive) ─────────────────────────────── */
 function TreeNode({ node, currentPath, onNavigate, depth = 0 }) {
@@ -179,8 +332,21 @@ function SidebarContent({
   onCreateFolder,
   onManageUsers,
   onActivityLog,
+  onChangePassword,
 }) {
   const { toggleTheme } = useTheme();
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userRowRef = useRef(null);
+
+  // Close user menu on outside click
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const close = (e) => {
+      if (userRowRef.current && !userRowRef.current.contains(e.target)) setUserMenuOpen(false);
+    };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [userMenuOpen]);
 
   return (
     <div style={sidebarStyles.inner}>
@@ -190,7 +356,6 @@ function SidebarContent({
           <BrandIcon />
           <span style={sidebarStyles.brandName}>MediaVault</span>
         </div>
-        <button style={sidebarStyles.closeBtn} onClick={onClose}>✕</button>
       </div>
 
       {/* Nav */}
@@ -246,13 +411,70 @@ function SidebarContent({
 
       {/* Footer */}
       <div style={sidebarStyles.footer}>
-        <div style={sidebarStyles.userRow}>
-          <div style={sidebarStyles.avatar}>{user?.[0]?.toUpperCase()}</div>
-          <div style={sidebarStyles.userInfo}>
-            <span style={sidebarStyles.username}>{user}</span>
-            {isAdmin && <span style={sidebarStyles.roleBadge}>admin</span>}
-          </div>
+        {/* User row — clickable, pops menu upward */}
+        <div ref={userRowRef} style={{ position: "relative", marginBottom: 10 }}>
+          <button
+            style={{
+              ...sidebarStyles.userRow,
+              width: "100%",
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: 0,
+              marginBottom: 0,
+              borderRadius: 10,
+              transition: "background 0.15s",
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(128,128,128,0.08)"}
+            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+            onClick={() => setUserMenuOpen((o) => !o)}
+            title="Click for options"
+          >
+            <div style={sidebarStyles.avatar}>{user?.[0]?.toUpperCase()}</div>
+            <div style={sidebarStyles.userInfo}>
+              <span style={sidebarStyles.username}>{user}</span>
+              {isAdmin && <span style={sidebarStyles.roleBadge}>admin</span>}
+            </div>
+            <span style={{
+              marginLeft: "auto", fontSize: "0.7rem", color: "var(--text-3)",
+              transform: userMenuOpen ? "rotate(180deg)" : "rotate(0deg)",
+              transition: "transform 0.2s", lineHeight: 1, paddingRight: 4,
+            }}>▾</span>
+          </button>
+
+          {/* Popup menu — appears above the user row */}
+          {userMenuOpen && (
+            <div style={{
+              position: "absolute",
+              bottom: "calc(100% + 6px)", left: 0, right: 0,
+              background: "var(--glass-bg)",
+              backdropFilter: "blur(24px) saturate(200%)",
+              WebkitBackdropFilter: "blur(24px) saturate(200%)",
+              border: "1px solid var(--glass-border)",
+              borderRadius: 14,
+              boxShadow: "0 1px 0 var(--glass-shine) inset, 0 -12px 40px rgba(0,0,0,0.3)",
+              overflow: "hidden",
+              zIndex: 500,
+              animation: "slideUp 0.18s ease",
+            }}>
+              <button
+                style={{
+                  width: "100%", display: "flex", alignItems: "center", gap: 8,
+                  padding: "10px 14px", background: "transparent", border: "none",
+                  color: "var(--text-1)", cursor: "pointer",
+                  fontFamily: "inherit", fontSize: "0.84rem", fontWeight: 500,
+                  transition: "background 0.12s",
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = "rgba(128,128,128,0.1)"}
+                onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                onClick={() => { setUserMenuOpen(false); onChangePassword?.(); }}
+              >
+                <KeyIcon /> Change Password
+              </button>
+            </div>
+          )}
         </div>
+
         <div style={sidebarStyles.footerActions}>
           <button style={sidebarStyles.themeBtn} onClick={toggleTheme} title="Toggle theme">
             <SunIcon /><MoonIcon />
@@ -273,6 +495,17 @@ export default function Sidebar({
 }){
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
+  const [showChangePassword, setShowChangePassword] = useState(false);
+
+  // Long-press for mobile capsule
+  const longPressTimer = useRef(null);
+  function startLongPress() {
+    longPressTimer.current = setTimeout(() => {
+      navigator.vibrate?.(40);
+      setShowChangePassword(true);
+    }, 600);
+  }
+  function cancelLongPress() { clearTimeout(longPressTimer.current); }
 
   // Close on ESC
   useEffect(() => {
@@ -336,6 +569,7 @@ export default function Sidebar({
           onClose={() => {}} onUpload={onUpload}
           onCreateFolder={onCreateFolder} onManageUsers={onManageUsers}
           onActivityLog={onActivityLog}
+          onChangePassword={() => setShowChangePassword(true)}
         />
       </aside>
 
@@ -362,6 +596,7 @@ export default function Sidebar({
               onCreateFolder={onCreateFolder}
               onManageUsers={onManageUsers}
               onActivityLog={onActivityLog}
+              onChangePassword={() => setShowChangePassword(true)}
             />
           </aside>
         </>
@@ -381,7 +616,7 @@ export default function Sidebar({
         }}
         className="mv-bottom-nav"
       >
-      {/* User name capsule — clickable for admin to expand options */}
+      {/* User name capsule — long press for password change, click for admin menu */}
       <div style={{ position: "relative" }}>
         <div
           style={{
@@ -395,12 +630,18 @@ export default function Sidebar({
             border: "1px solid var(--glass-border)",
             borderRadius: 999,
             boxShadow: "0 1px 0 var(--glass-shine) inset, 0 4px 16px var(--glass-shadow)",
-            cursor: isAdmin ? "pointer" : "default",
+            cursor: "pointer",
             WebkitTapHighlightColor: "transparent",
             position: "relative",
             zIndex: 2,
+            userSelect: "none",
           }}
           onClick={() => isAdmin && setAdminMenuOpen((o) => !o)}
+          onTouchStart={startLongPress}
+          onTouchEnd={cancelLongPress}
+          onTouchMove={cancelLongPress}
+          onContextMenu={(e) => { e.preventDefault(); setShowChangePassword(true); }}
+          title="Long press to change password"
         >
           <div style={{
             width: 18, height: 18, borderRadius: "50%",
@@ -583,6 +824,10 @@ export default function Sidebar({
             </div>
           </div>
         </>
+      )}
+      {/* ── Change Password Modal ── */}
+      {showChangePassword && (
+        <ChangePasswordModal onClose={() => setShowChangePassword(false)} />
       )}
     </>
   );
