@@ -1011,40 +1011,70 @@ function flattenFolderTreeForPicker(nodes, prefix = "") {
   return out;
 }
 
-function FolderPickerDropdown({ folderTree, selectedFolders, onChange, onClose }) {
-  const ref = useRef(null);
+function FolderPickerDropdown({ folderTree, selectedFolders, onChange, onClose, anchorRef }) {
+  const ref        = useRef(null);
+  const [rect, setRect] = useState(() =>
+    anchorRef?.current ? anchorRef.current.getBoundingClientRect() : null
+  );
   const allFolders = flattenFolderTreeForPicker(folderTree);
-  const isAll = selectedFolders.includes("__all__");
+  const isAll      = selectedFolders.includes("__all__");
+
+  // useLayoutEffect so position is set before first paint — no flash at -9999
+  useEffect(() => {
+    if (anchorRef?.current) setRect(anchorRef.current.getBoundingClientRect());
+  }, []);
 
   useEffect(() => {
-    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    const close = (e) => {
+      if (ref.current && !ref.current.contains(e.target) &&
+          anchorRef?.current && !anchorRef.current.contains(e.target)) {
+        onClose();
+      }
+    };
     window.addEventListener("mousedown", close);
-    return () => window.removeEventListener("mousedown", close);
-  }, [onClose]);
+    window.addEventListener("touchstart", close);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("touchstart", close);
+    };
+  }, [onClose, anchorRef]);
 
-  function toggleAll() {
-    onChange(["__all__"]);
-  }
-
+  function toggleAll() { onChange(["__all__"]); }
   function toggleFolder(path) {
-    if (isAll) {
-      // switching from "all" to a specific selection
-      onChange([path]);
-      return;
-    }
-    const has = selectedFolders.includes(path);
+    if (isAll) { onChange([path]); return; }
+    const has  = selectedFolders.includes(path);
     const next = has ? selectedFolders.filter((p) => p !== path) : [...selectedFolders, path];
     onChange(next.length ? next : ["__all__"]);
   }
 
+  const W  = 220;
+  const vw = typeof window !== "undefined" ? window.innerWidth : 400;
+  const top  = rect ? rect.bottom + 6 : -9999;
+  const left = rect ? Math.min(Math.max(rect.right - W, 8), vw - W - 8) : -9999;
+
   return (
-    <div ref={ref} style={fp.dropdown}>
+    <div
+      ref={ref}
+      style={{
+        position: "fixed",
+        top, left,
+        width: W,
+        zIndex: 9999,
+        background: "var(--glass-bg)",
+        backdropFilter: "blur(24px) saturate(200%)",
+        WebkitBackdropFilter: "blur(24px) saturate(200%)",
+        border: "1px solid var(--glass-border)",
+        borderRadius: 16,
+        maxHeight: 300,
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        boxShadow: "0 1px 0 var(--glass-shine) inset, 0 20px 60px rgba(0,0,0,0.45)",
+      }}
+    >
       <div style={fp.header}>Photo source</div>
-      <div style={fp.list}>
-        <button
-          style={{ ...fp.item, ...(isAll ? fp.itemActive : {}) }}
-          onClick={toggleAll}
-        >
+      <div style={{ ...fp.list, overflowY: "auto" }}>
+        <button style={{ ...fp.item, ...(isAll ? fp.itemActive : {}) }} onClick={toggleAll}>
           <span style={fp.checkbox}>{isAll && <CheckMark />}</span>
           All folders
         </button>
@@ -1080,6 +1110,8 @@ const fp = {
     WebkitBackdropFilter: "blur(24px) saturate(200%)",
     border: "1px solid var(--glass-border)",
     borderRadius: 14, minWidth: 200, maxHeight: 280,
+    /* On narrow screens, don't bleed off the left edge of the viewport */
+    maxWidth: "calc(100vw - 16px)",
     boxShadow: "0 1px 0 var(--glass-shine) inset, 0 16px 48px var(--glass-shadow)",
     zIndex: 50, overflow: "hidden",
     display: "flex", flexDirection: "column",
@@ -1111,8 +1143,9 @@ function RandomPhotosWidget({
   folderTree, selectedFolders, onFoldersChange,
   showFolderPicker, setShowFolderPicker,
 }) {
+  const folderBtnRef = useRef(null);
   return (
-    <div style={rw.wrap} className="glass-card">
+    <div style={{ ...rw.wrap, position: "relative" }} className="glass-card rw-wrap-override">
       {/* Header */}
       <div style={rw.header}>
         <div style={rw.titleRow}>
@@ -1159,7 +1192,15 @@ function RandomPhotosWidget({
 
           {/* Folder picker */}
           <div style={{ position: "relative" }}>
-            <button style={rw.refreshBtn} onClick={() => setShowFolderPicker((s) => !s)} title="Choose folders">
+            <button
+              ref={folderBtnRef}
+              style={rw.refreshBtn}
+              title="Choose folders"
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                setShowFolderPicker((s) => !s);
+              }}
+            >
               <svg viewBox="0 0 20 20" fill="none" width="13" height="13">
                 <path d="M2 6a2 2 0 012-2h3.586a1 1 0 01.707.293L9.414 5.5H16a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" stroke="currentColor" strokeWidth="1.4" />
               </svg>
@@ -1175,6 +1216,7 @@ function RandomPhotosWidget({
                 selectedFolders={selectedFolders}
                 onChange={onFoldersChange}
                 onClose={() => setShowFolderPicker(false)}
+                anchorRef={folderBtnRef}
               />
             )}
           </div>
@@ -1221,8 +1263,9 @@ function RandomPhotosWidget({
 const rw = {
   wrap: {
     borderRadius: 18,
-    overflow: "hidden",
+    overflow: "visible",
     marginBottom: 4,
+    /* keep visual card shape via box-shadow / border on inner elements */
   },
   header: {
     display: "flex",
@@ -1232,6 +1275,8 @@ const rw = {
     borderBottom: "1px solid var(--glass-border)",
     gap: 10,
     flexWrap: "wrap",
+    /* ensure the folder-picker dropdown can escape this container */
+    overflow: "visible",
   },
   titleRow: {
     display: "flex",
@@ -1706,6 +1751,20 @@ function handleTouchEnd() {
   return (
     <BaseLayout>
       <style>{`
+        .rw-wrap-override,
+        .rw-wrap-override * { overflow: visible !important; }
+        /* restore overflow on elements that actually need it */
+        .rw-wrap-override .rw-grid,
+        .rw-wrap-override .fp-list { overflow: hidden !important; }
+        .rw-wrap-override .fp-list { overflow-y: auto !important; }
+        @media (max-width: 767px) {
+          /* Keep folder picker from bleeding off left edge on mobile */
+          .fp-dropdown { right: 0 !important; left: auto !important; }
+        }
+        .back-btn:hover {
+          background: linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.08) 100%) !important;
+          box-shadow: 0 4px 20px rgba(0,0,0,0.25), 0 1px 0 rgba(255,255,255,0.18) inset !important;
+        }
         @keyframes ctxFadeIn {
           from { opacity: 0; transform: scale(0.96) translateY(-4px); }
           to   { opacity: 1; transform: scale(1)    translateY(0); }
@@ -1874,16 +1933,19 @@ function handleTouchEnd() {
             </button>
           </div>
         )}
-        {/* ── Back button + path — only inside a folder ── */}
         {currentPath && (
-          <div style={gs.topBar}>
-            <button style={gs.backBtn} onClick={goUp}>
+          <div className="back-bar" style={{
+            position: "sticky", top: "52px", zIndex: 40,
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "6px 0",
+          }}>
+            <button style={gs.backBtn} className="back-btn" onClick={goUp}>
               <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
                 <path d="M13 5l-5 5 5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
               Back
             </button>
-            <span style={gs.pathLabel}>/{currentPath}</span>
+            {/* <span style={gs.pathLabel}>/{currentPath}</span> */}
           </div>
         )}
 
@@ -1898,7 +1960,7 @@ function handleTouchEnd() {
             onPhotoClick={(i) => setRandomLightbox(i)}
             folderTree={folderTree}
             selectedFolders={randomFolders}
-            onFoldersChange={(f) => { setRandomFolders(f); loadRandomPhotos(randomCount, f); setShowFolderPicker(false); }}
+            onFoldersChange={(f) => { setRandomFolders(f); loadRandomPhotos(randomCount, f); }}
             showFolderPicker={showFolderPicker}
             setShowFolderPicker={setShowFolderPicker}
           />
@@ -1975,7 +2037,7 @@ function handleTouchEnd() {
                     if (totalSelected > 0) { toggleSelectFile(file); return; }
                     setLightboxIndex(globalIdx);   // ← correct full-list index
                   }}
-                  onContextMenu={(x, y) => openFileContextMenu(x, y, file, idx)}
+                  onContextMenu={(x, y) => openFileContextMenu(x, y, file, globalIdx)}
                 />
                 <span className="rc-hint">right-click</span>
               </div>
@@ -2202,12 +2264,27 @@ const gs = {
     display: "flex", alignItems: "center", gap: 10,
     padding: "10px 0 0",
   },
+  topBar: {
+    display: "flex", alignItems: "center", gap: 10,
+    padding: "8px 0",
+    position: "sticky", top: 0,
+    zIndex: 40,
+    backdropFilter: "blur(12px)",
+    WebkitBackdropFilter: "blur(12px)",
+  },
   backBtn: {
     display: "flex", alignItems: "center", gap: 6,
-    background: "var(--glass-bg)", border: "1px solid var(--glass-border)",
-    borderRadius: 10, padding: "7px 12px",
-    color: "var(--text-2)", cursor: "pointer",
-    fontSize: "0.84rem", fontFamily: "inherit", fontWeight: 500,
+    background: "linear-gradient(135deg, rgba(255,255,255,0.13) 0%, rgba(255,255,255,0.05) 100%)",
+    border: "1px solid rgba(255,255,255,0.18)",
+    borderRadius: 999,
+    padding: "7px 16px",
+    color: "var(--text-1)", cursor: "pointer",
+    fontSize: "0.84rem", fontFamily: "inherit", fontWeight: 600,
+    boxShadow: "0 2px 12px rgba(0,0,0,0.18), 0 1px 0 rgba(255,255,255,0.12) inset",
+    backdropFilter: "blur(8px)",
+    WebkitBackdropFilter: "blur(8px)",
+    transition: "box-shadow 0.18s, background 0.18s",
+    whiteSpace: "nowrap",
   },
   pathLabel: {
     fontSize: "0.82rem", color: "var(--text-3)",
