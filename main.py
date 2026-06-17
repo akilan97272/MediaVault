@@ -62,7 +62,7 @@ _NO_CACHE = {
 }
 
 _CHUNK = 256 * 1024
-DIST_DIR     = os.path.join(BASE_DIR, "dist")
+DIST_DIR     = os.path.join(BASE_DIR, "static")
 _index_html: str | None = None
 
 def _load_index() -> str:
