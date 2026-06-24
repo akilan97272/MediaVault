@@ -173,6 +173,85 @@ function MoveModal({ filenames, currentPath, folderTree, onClose, onMoved }) {
 }
 
 /* ── Folder Card ─────────────────────────────────────────── */
+/* ── Pagination Bar ────────────────────────────────────── */
+function PaginationBar({ page, totalPages, setPage }) {
+  // Build page number windows: always show first, last, current ±1, with ellipsis
+  function getPages() {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i);
+    const pages = new Set([0, totalPages - 1, page]);
+    if (page > 0) pages.add(page - 1);
+    if (page < totalPages - 1) pages.add(page + 1);
+    const sorted = [...pages].sort((a, b) => a - b);
+    // Insert ellipsis markers
+    const result = [];
+    for (let i = 0; i < sorted.length; i++) {
+      if (i > 0 && sorted[i] - sorted[i - 1] > 1) result.push("…");
+      result.push(sorted[i]);
+    }
+    return result;
+  }
+
+  const btnBase = {
+    minWidth: 36, height: 36, borderRadius: 999,
+    border: "1px solid var(--glass-border)",
+    background: "var(--glass-bg)",
+    color: "var(--text-2)", cursor: "pointer",
+    fontSize: "0.83rem", fontFamily: "inherit", fontWeight: 600,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    padding: "0 12px",
+    backdropFilter: "blur(8px)",
+    WebkitBackdropFilter: "blur(8px)",
+    transition: "background 0.15s, color 0.15s, border-color 0.15s",
+    whiteSpace: "nowrap",
+  };
+  const btnActive = {
+    background: "rgba(255,255,255,0.15)",
+    border: "1px solid rgba(255,255,255,0.35)",
+    color: "var(--text-1)",
+    boxShadow: "0 1px 0 rgba(255,255,255,0.12) inset",
+  };
+  const btnDisabled = { opacity: 0.35, cursor: "not-allowed" };
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", justifyContent: "center", padding: "10px 0" }}>
+      {/* PREV */}
+      <button
+        style={{ ...btnBase, ...(page === 0 ? btnDisabled : {}) }}
+        onClick={() => page > 0 && setPage(page - 1)}
+        disabled={page === 0}
+      >
+        PREV
+      </button>
+
+      {/* Page numbers + ellipsis */}
+      {getPages().map((p, i) =>
+        p === "…" ? (
+          <span key={`ellipsis-${i}`} style={{ color: "var(--text-3)", fontSize: "0.85rem", padding: "0 2px", letterSpacing: "0.1em" }}>
+            …
+          </span>
+        ) : (
+          <button
+            key={p}
+            style={{ ...btnBase, ...(p === page ? btnActive : {}), minWidth: 36, padding: "0 2px" }}
+            onClick={() => setPage(p)}
+          >
+            {p + 1}
+          </button>
+        )
+      )}
+
+      {/* NEXT */}
+      <button
+        style={{ ...btnBase, ...(page === totalPages - 1 ? btnDisabled : {}) }}
+        onClick={() => page < totalPages - 1 && setPage(page + 1)}
+        disabled={page === totalPages - 1}
+      >
+        NEXT
+      </button>
+    </div>
+  );
+}
+
 function FolderCard({ name, onClick, onContextMenu, selected }) {
   const longPressTimer = useRef(null);
 
@@ -2006,9 +2085,9 @@ function handleTouchEnd() {
         )}
         {currentPath && (
           <div className="back-bar" style={{
-            position: "sticky", top: "52px", zIndex: 40,
+            position: "sticky", top: "8px", zIndex: 40,
             display: "flex", alignItems: "center", gap: 10,
-            padding: "6px 0",
+            padding: "4px 0",
           }}>
             <button style={gs.backBtn} className="back-btn" onClick={goUp}>
               <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
@@ -2016,7 +2095,6 @@ function handleTouchEnd() {
               </svg>
               Back
             </button>
-            {/* <span style={gs.pathLabel}>/{currentPath}</span> */}
           </div>
         )}
 
@@ -2041,17 +2119,7 @@ function handleTouchEnd() {
         {totalPages > 1 && (
           <div style={gs.paginationBar}>
             <span style={gs.fileCount}>{files.length} file{files.length !== 1 ? "s" : ""}</span>
-            <div style={gs.pagination}>
-              {Array.from({ length: totalPages }, (_, i) => (
-                <button
-                  key={i}
-                  style={{ ...gs.pageBtn, ...(i === page ? gs.pageBtnActive : {}) }}
-                  onClick={() => setPage(i)}
-                >
-                  {i + 1}
-                </button>
-              ))}
-            </div>
+            <PaginationBar page={page} totalPages={totalPages} setPage={setPage} />
           </div>
         )}
 
@@ -2120,17 +2188,7 @@ function handleTouchEnd() {
         {totalPages > 1 && (
           <div style={gs.paginationBar} className="paginationBar-bottom">
             <span style={gs.fileCount}>{files.length} file{files.length !== 1 ? "s" : ""}</span>
-            <div style={gs.pagination}>
-              {Array.from({ length: totalPages }, (_, i) => (
-                <button
-                  key={i}
-                  style={{ ...gs.pageBtn, ...(i === page ? gs.pageBtnActive : {}) }}
-                  onClick={() => setPage(i)}
-                >
-                  {i + 1}
-                </button>
-              ))}
-            </div>
+            <PaginationBar page={page} totalPages={totalPages} setPage={setPage} />
           </div>
         )}
 
