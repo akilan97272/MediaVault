@@ -368,6 +368,7 @@ function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, se
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const dragState  = useRef({ dragging: false, startX: 0, startY: 0, startOffset: { x: 0, y: 0 } });
   const pinchState = useRef({ active: false, startDist: 0, startZoom: 1 });
+  const swipeState = useRef({ active: false, startX: 0, startY: 0, dx: 0 });
 
   if (!file) return null;
   const isVideo = /\.(mp4|webm|mkv)$/i.test(file);
@@ -443,11 +444,16 @@ function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, se
       touches[0].clientY - touches[1].clientY
     );
   }
+  const SWIPE_THRESHOLD = 50; // px — minimum horizontal travel to count as a swipe
+
   function handleTouchStart(e) {
     if (e.touches.length === 2) {
       pinchState.current = { active: true, startDist: getTouchDist(e.touches), startZoom: zoom };
     } else if (e.touches.length === 1 && zoom > 1) {
       dragState.current = { dragging: true, startX: e.touches[0].clientX, startY: e.touches[0].clientY, startOffset: { ...panOffset } };
+    } else if (e.touches.length === 1 && zoom <= 1) {
+      // Not zoomed in — a single-finger horizontal drag means "swipe to next/prev photo"
+      swipeState.current = { active: true, startX: e.touches[0].clientX, startY: e.touches[0].clientY, dx: 0 };
     }
   }
   function handleTouchMove(e) {
@@ -460,15 +466,31 @@ function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, se
         x: dragState.current.startOffset.x + (e.touches[0].clientX - dragState.current.startX),
         y: dragState.current.startOffset.y + (e.touches[0].clientY - dragState.current.startY),
       });
+    } else if (swipeState.current.active && e.touches.length === 1) {
+      swipeState.current.dx = e.touches[0].clientX - swipeState.current.startX;
+      swipeState.current.dy = e.touches[0].clientY - swipeState.current.startY;
     }
   }
   function handleTouchEnd() {
     pinchState.current.active   = false;
     dragState.current.dragging  = false;
+
+    if (swipeState.current.active) {
+      const { dx, dy = 0 } = swipeState.current;
+      // Only treat it as a swipe if the motion was mostly horizontal
+      if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy)) {
+        if (dx < 0) onNext(); else onPrev();
+      }
+      swipeState.current = { active: false, startX: 0, startY: 0, dx: 0, dy: 0 };
+    }
   }
 
   return (
-    <div style={lb.overlay} onClick={() => { setPlaying(false); onClose(); }}>
+    <div
+      style={lb.overlay}
+      onClick={() => { setPlaying(false); onClose(); }}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+    >
 
       {/* ── Top-right buttons ── */}
       <div style={lb.topRight} onClick={(e) => e.stopPropagation()}>
@@ -652,8 +674,7 @@ const lb = {
   },
   progressBar: {
     height: "100%",
-    background: "linear-gradient(90deg, var(--accent), rgba(160,80,255,0.9))",
-    borderRadius: 1,
+    background: "var(--accent)",
     width: "0%",
   },
   speedPicker: {
@@ -1289,11 +1310,12 @@ const fp = {
 };
 
 function RandomPhotosWidget({
-  photos, count, onCountChange, onRefresh, loading, onPhotoClick,
+  photos, count, available, onCountChange, onRefresh, loading, onPhotoClick,
   folderTree, selectedFolders, onFoldersChange,
   showFolderPicker, setShowFolderPicker,
 }) {
   const folderBtnRef = useRef(null);
+  const shortfall = typeof available === "number" && available < count;
   return (
     <div style={{ ...rw.wrap, position: "relative" }} className="glass-card rw-wrap-override">
       {/* Header */}
@@ -1308,23 +1330,31 @@ function RandomPhotosWidget({
         </div>
 
         <div style={rw.controls}>
-          {/* Count selector pills */}
+          {/* Count selector pills — options beyond what's available are disabled, not removed,
+              so the user can still see what tiers exist without breaking the request. */}
           <div style={rw.pills}>
-            {RANDOM_COUNTS.map((n) => (
-              <button
-                key={n}
-                style={{
-                  ...rw.pill,
-                  background: n === count ? "var(--accent-bg)" : "transparent",
-                  border: n === count ? "1px solid var(--accent-border)" : "1px solid var(--glass-border)",
-                  color: n === count ? "var(--accent)" : "var(--text-3)",
-                  fontWeight: n === count ? 700 : 500,
-                }}
-                onClick={() => onCountChange(n)}
-              >
-                {n}
-              </button>
-            ))}
+            {RANDOM_COUNTS.map((n) => {
+              const disabled = typeof available === "number" && available < n;
+              return (
+                <button
+                  key={n}
+                  style={{
+                    ...rw.pill,
+                    background: n === count ? "var(--accent-bg)" : "transparent",
+                    border: n === count ? "1px solid var(--accent-border)" : "1px solid var(--glass-border)",
+                    color: disabled ? "var(--text-3)" : (n === count ? "var(--accent)" : "var(--text-3)"),
+                    fontWeight: n === count ? 700 : 500,
+                    opacity: disabled ? 0.4 : 1,
+                    cursor: disabled ? "default" : "pointer",
+                  }}
+                  onClick={() => !disabled && onCountChange(n)}
+                  disabled={disabled}
+                  title={disabled ? `Only ${available} photo${available !== 1 ? "s" : ""} available` : undefined}
+                >
+                  {n}
+                </button>
+              );
+            })}
           </div>
 
           {/* Refresh */}
@@ -1372,6 +1402,13 @@ function RandomPhotosWidget({
           </div>
         </div>
       </div>
+
+      {/* Shortfall note — shown when fewer photos exist than the selected tier */}
+      {!loading && shortfall && photos.length > 0 && (
+        <div style={rw.shortfallNote}>
+          Only {available} photo{available !== 1 ? "s" : ""} available — showing all of them.
+        </div>
+      )}
 
       {/* Grid */}
       {loading && (
@@ -1486,6 +1523,12 @@ const rw = {
     color: "var(--text-3)",
     fontSize: "0.84rem",
   },
+  shortfallNote: {
+    padding: "8px 14px 0",
+    fontSize: "0.74rem",
+    color: "var(--text-3)",
+    fontStyle: "italic",
+  },
   grid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))",
@@ -1534,6 +1577,7 @@ export default function GalleryDashboard() {
   const [slideshow, setSlideshow]         = useState(false);
   const [slideshowInterval, setSlideshowInterval] = useState(10); // seconds
   const [randomPhotos, setRandomPhotos]       = useState([]);
+  const [randomAvailable, setRandomAvailable] = useState(null); // total photos available for current folder selection
   const [randomCount, setRandomCount]         = useState(20);
   const [randomLoading, setRandomLoading]     = useState(false);
   const [randomLightbox, setRandomLightbox]   = useState(null); // index into randomPhotos
@@ -1586,7 +1630,11 @@ const { user, isAdmin } = useAuth();
         folders.forEach((f) => params.append("folders", f));
       }
       const res = await fetch(`/api/random-photos?${params.toString()}`);
-      if (res.ok) setRandomPhotos(await res.json());
+      if (res.ok) {
+        const d = await res.json();
+        setRandomPhotos(d.photos || []);
+        setRandomAvailable(typeof d.available === "number" ? d.available : (d.photos || []).length);
+      }
     } catch (e) { console.error(e); }
     finally { setRandomLoading(false); }
   }, [isAdmin, randomFolders]);
@@ -1912,8 +1960,8 @@ function handleTouchEnd() {
           .fp-dropdown { right: 0 !important; left: auto !important; }
         }
         .back-btn:hover {
-          background: linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.08) 100%) !important;
-          box-shadow: 0 4px 20px rgba(0,0,0,0.25), 0 1px 0 rgba(255,255,255,0.18) inset !important;
+          background: var(--accent-bg) !important;
+          box-shadow: 3px 3px 0 var(--glass-shadow) !important;
         }
         @keyframes ctxFadeIn {
           from { opacity: 0; transform: scale(0.96) translateY(-4px); }
@@ -2098,11 +2146,15 @@ function handleTouchEnd() {
           </div>
         )}
 
-        {/* ── Random Photos Widget — home screen only, non-admin ── */}
-        {currentPath === "" && !isAdmin && (
+        {/* ── Random Photos Widget — home screen only, non-admin ──
+             Hidden entirely when there are no photos to show (empty library
+             or empty selected folder). Only shown once we actually know
+             photos are present, to avoid a flash of an empty widget. */}
+        {currentPath === "" && !isAdmin && randomAvailable !== null && randomAvailable > 0 && (
           <RandomPhotosWidget
             photos={randomPhotos}
             count={randomCount}
+            available={randomAvailable}
             onCountChange={(n) => { setRandomCount(n); loadRandomPhotos(n, randomFolders); }}
             onRefresh={() => loadRandomPhotos(randomCount, randomFolders)}
             loading={randomLoading}
@@ -2403,13 +2455,12 @@ const gs = {
   },
   backBtn: {
     display: "flex", alignItems: "center", gap: 6,
-    background: "linear-gradient(135deg, rgba(255,255,255,0.13) 0%, rgba(255,255,255,0.05) 100%)",
-    border: "1px solid rgba(255,255,255,0.18)",
-    borderRadius: 999,
+    background: "var(--glass-bg)",
+    border: "2px solid var(--glass-border)",
     padding: "7px 16px",
     color: "var(--text-1)", cursor: "pointer",
     fontSize: "0.84rem", fontFamily: "inherit", fontWeight: 600,
-    boxShadow: "0 2px 12px rgba(0,0,0,0.18), 0 1px 0 rgba(255,255,255,0.12) inset",
+    boxShadow: "3px 3px 0 var(--glass-shadow)",
     backdropFilter: "blur(8px)",
     WebkitBackdropFilter: "blur(8px)",
     transition: "box-shadow 0.18s, background 0.18s",

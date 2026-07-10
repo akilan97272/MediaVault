@@ -14,6 +14,12 @@ const MoonIcon = () => (
     <path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
   </svg>
 );
+const RefreshIcon = () => (
+  <svg className="icon-refresh" viewBox="0 0 24 24" fill="none" width="18" height="18">
+    <path d="M4 4v6h6M20 20v-6h-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M5 14a8 8 0 0014.5 3M19 10A8 8 0 004.5 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+  </svg>
+);
 
 function getLoginError() {
   const p = new URLSearchParams(window.location.search);
@@ -67,7 +73,7 @@ export default function Login() {
     <BaseLayout>
       {/* Theme toggle */}
       <button style={s.themeToggle} onClick={toggleTheme} title="Toggle theme">
-        <SunIcon /><MoonIcon />
+        <SunIcon /><MoonIcon /><RefreshIcon />
       </button>
 
       <div style={s.wrap}>
@@ -210,10 +216,9 @@ const s = {
   },
   brandIcon: {
     width: 64, height: 64,
-    background: "linear-gradient(135deg, var(--accent) 0%, rgba(160,80,255,0.9) 100%)",
-    borderRadius: 20,
+    background: "var(--accent)",
+    border: "2px solid var(--glass-border)",
     display: "flex", alignItems: "center", justifyContent: "center",
-    boxShadow: "0 8px 32px var(--accent-glow)",
   },
   brandName: {
     fontFamily: "'Instrument Serif', Georgia, serif",

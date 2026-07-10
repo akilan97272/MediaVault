@@ -497,22 +497,29 @@ def admin_page(request: Request):
 
 # ── Admin helpers ─────────────────────────────────────────────────────────────
 
-def _count_dir(path: str) -> tuple[int, int]:
+def _count_dir(path: str) -> tuple[int, int, float]:
+    """Returns (file_count, total_size, most_recent_mtime)."""
     count = size = 0
+    last_mtime = 0.0
     try:
         with os.scandir(path) as it:
             for e in it:
                 if e.is_file(follow_symlinks=False):
                     if e.name.lower().endswith(_ALLOWED_EXT):
+                        st = e.stat()
                         count += 1
-                        size  += e.stat().st_size
+                        size  += st.st_size
+                        if st.st_mtime > last_mtime:
+                            last_mtime = st.st_mtime
                 elif e.is_dir(follow_symlinks=False):
-                    c, s   = _count_dir(e.path)
+                    c, s, m = _count_dir(e.path)
                     count += c
                     size  += s
+                    if m > last_mtime:
+                        last_mtime = m
     except OSError:
         pass
-    return count, size
+    return count, size, last_mtime
 
 
 def _recent_files(n: int) -> list[str]:
@@ -554,8 +561,12 @@ def admin_stats(request: Request):
         with os.scandir(MEDIA_DIR) as it:
             for entry in it:
                 if entry.is_dir(follow_symlinks=False):
-                    c, s = _count_dir(entry.path)
-                    user_stats[entry.name] = {"files": c, "size": s}
+                    c, s, m = _count_dir(entry.path)
+                    user_stats[entry.name] = {
+                        "files": c,
+                        "size": s,
+                        "last_upload": datetime.fromtimestamp(m).isoformat() if m else None,
+                    }
                     total_files += c
                     total_size  += s
     except OSError:
@@ -1033,4 +1044,8 @@ async def random_photos(
                 pool.extend(p for p in paths if IMAGE_EXT.search(p))
 
     random.shuffle(pool)
-    return [f"/media/{p}" for p in pool[:count]]
+    return {
+        "photos":    [f"/media/{p}" for p in pool[:count]],
+        "available": len(pool),
+        "requested": count,
+    }

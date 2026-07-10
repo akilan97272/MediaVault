@@ -2,9 +2,13 @@ import { createContext, useContext, useEffect, useState } from "react";
 
 const ThemeContext = createContext();
 
+// Three brutalist themes, cycled in this order.
+const THEME_ORDER = ["dark", "light", "refresh"];
+
 export function ThemeProvider({ children }) {
   const [theme, setTheme] = useState(() => {
-    return localStorage.getItem("mv-theme") || "dark";
+    const stored = localStorage.getItem("mv-theme");
+    return THEME_ORDER.includes(stored) ? stored : "dark";
   });
 
   useEffect(() => {
@@ -13,10 +17,10 @@ export function ThemeProvider({ children }) {
   }, [theme]);
 
   const toggleTheme = () =>
-    setTheme((t) => (t === "dark" ? "light" : "dark"));
+    setTheme((t) => THEME_ORDER[(THEME_ORDER.indexOf(t) + 1) % THEME_ORDER.length]);
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+    <ThemeContext.Provider value={{ theme, toggleTheme, themeOrder: THEME_ORDER }}>
       {children}
     </ThemeContext.Provider>
   );

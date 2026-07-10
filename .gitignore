@@ -9,3 +9,4 @@ SCHEDULER_INTEGRATION.md
 media_index.json
 static/
 dist/
+package-lock.json

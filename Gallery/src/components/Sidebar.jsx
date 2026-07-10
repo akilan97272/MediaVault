@@ -68,6 +68,13 @@ const MoonIcon = () => (
   </svg>
 );
 
+const RefreshIcon = () => (
+  <svg className="icon-refresh" viewBox="0 0 24 24" fill="none" width="15" height="15">
+    <path d="M4 4v6h6M20 20v-6h-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M5 14a8 8 0 0014.5 3M19 10A8 8 0 004.5 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+  </svg>
+);
+
 const UploadIcon = () => (
   <svg viewBox="0 0 20 20" fill="none" width="15" height="15">
     <path d="M10 13V4M6 7l4-4 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -477,7 +484,7 @@ function SidebarContent({
 
         <div style={sidebarStyles.footerActions}>
           <button style={sidebarStyles.themeBtn} onClick={toggleTheme} title="Toggle theme">
-            <SunIcon /><MoonIcon />
+            <SunIcon /><MoonIcon /><RefreshIcon />
           </button>
           <a href="/logout" style={sidebarStyles.logoutBtn}>Sign out</a>
         </div>
