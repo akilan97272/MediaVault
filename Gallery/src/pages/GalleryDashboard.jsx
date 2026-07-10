@@ -661,8 +661,8 @@ const lb = {
     display: "flex", alignItems: "center", justifyContent: "center",
     zIndex: 10,
   },
-  content: { maxWidth: "90vw", maxHeight: "85vh" },
-  media: { maxWidth: "90vw", maxHeight: "85vh", objectFit: "contain", borderRadius: 12 },
+  content: { maxWidth: "70vw", maxHeight: "70vh" },
+  media: { maxWidth: "70vw", maxHeight: "70vh", objectFit: "contain", borderRadius: 12 },
   counter: {
     position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)",
     fontSize: "0.78rem", color: "rgba(255,255,255,0.5)", fontWeight: 500,
