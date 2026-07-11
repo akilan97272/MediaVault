@@ -358,7 +358,7 @@ function MediaCard({ src, filename, isVideo, selected, onLightbox, onContextMenu
 /* ── Lightbox ────────────────────────────────────────────── */
 const SLIDESHOW_SPEEDS = [10, 15, 20, 25, 30];
 
-function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, setSlideshowInterval }) {
+function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, setSlideshowInterval, folderTree, onFileRemoved }) {
   const file = files[index];
   const [playing, setPlaying] = useState(false);
   const [showSpeedPicker, setShowSpeedPicker] = useState(false);
@@ -370,8 +370,87 @@ function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, se
   const pinchState = useRef({ active: false, startDist: 0, startZoom: 1 });
   const swipeState = useRef({ active: false, startX: 0, startY: 0, dx: 0 });
 
+  // ── Move / Delete state ──────────────────────────────
+  const [showMovePicker, setShowMovePicker] = useState(false);
+  const [moveDest, setMoveDest]             = useState("");
+  const [actionBusy, setActionBusy]         = useState(false);
+  const [actionError, setActionError]       = useState("");
+
   if (!file) return null;
   const isVideo = /\.(mp4|webm|mkv)$/i.test(file);
+
+  // Derive the folder path + filename this photo actually lives at, straight
+  // from its /media/ URL — works whether it came from the folder-scoped
+  // gallery grid or the cross-folder Random Photos widget.
+  const relPath  = decodeURIComponent(file.replace(/^\/media\//, ""));
+  const slashIdx = relPath.lastIndexOf("/");
+  const srcDir   = slashIdx >= 0 ? relPath.slice(0, slashIdx) : "";
+  const srcName  = slashIdx >= 0 ? relPath.slice(slashIdx + 1) : relPath;
+
+  function flattenFolderTree(nodes) {
+    const paths = [""];
+    (function walk(list, pre) {
+      for (const n of list || []) {
+        const p = pre ? `${pre}/${n.name}` : n.name;
+        paths.push(p);
+        if (n.children?.length) walk(n.children, p);
+      }
+    })(nodes, "");
+    return paths;
+  }
+
+  async function handleDelete() {
+    if (!confirm(`Delete "${srcName}"? This cannot be undone.`)) return;
+    setActionBusy(true); setActionError("");
+    try {
+      const res = await fetch(
+        `/api/media?path=${encodeURIComponent(srcDir)}&filename=${encodeURIComponent(srcName)}`,
+        { method: "DELETE" }
+      );
+      if (res.ok) {
+        setPlaying(false);
+        onFileRemoved?.(file);
+      } else {
+        const d = await res.json().catch(() => ({}));
+        setActionError(d.error || d.detail || "Failed to delete");
+      }
+    } catch {
+      setActionError("Network error while deleting");
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function handleMove() {
+    if (moveDest === srcDir) { setActionError("Already in that folder"); return; }
+    setActionBusy(true); setActionError("");
+    try {
+      const res = await fetch("/api/move", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ src_path: srcDir, filename: srcName, dest_path: moveDest }),
+      });
+      if (res.ok) {
+        setShowMovePicker(false);
+        setPlaying(false);
+        onFileRemoved?.(file);
+      } else {
+        const d = await res.json().catch(() => ({}));
+        setActionError(d.error || d.detail || "Failed to move");
+      }
+    } catch {
+      setActionError("Network error while moving");
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  // Reset move/delete UI when navigating to a different photo
+  useEffect(() => {
+    setShowMovePicker(false);
+    setMoveDest("");
+    setActionError("");
+  }, [file]);
 
   // Keyboard nav
   useEffect(() => {
@@ -502,6 +581,60 @@ function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, se
           </svg>
         </a>
 
+        {/* Move to… */}
+        <div style={{ position: "relative" }}>
+          <button
+            style={lb.iconBtn}
+            onClick={() => { setShowMovePicker((s) => !s); setActionError(""); setMoveDest(srcDir); }}
+            title="Move to folder"
+            disabled={actionBusy}
+          >
+            <svg viewBox="0 0 20 20" fill="none" width="15" height="15">
+              <path d="M3 6a1 1 0 011-1h4l1.5 2H16a1 1 0 011 1v7a1 1 0 01-1 1H4a1 1 0 01-1-1V6z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+              <path d="M10 9v4M8 11h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            </svg>
+          </button>
+          {showMovePicker && (
+            <div style={lb.movePicker}>
+              <div style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.5)", padding: "6px 10px 4px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Move to
+              </div>
+              {actionError && (
+                <div style={{ fontSize: "0.74rem", color: "#ff6b6b", padding: "2px 10px 8px" }}>{actionError}</div>
+              )}
+              <select
+                className="glass-input"
+                style={lb.moveSelect}
+                value={moveDest}
+                onChange={(e) => setMoveDest(e.target.value)}
+              >
+                {flattenFolderTree(folderTree).map((p) => (
+                  <option key={p} value={p}>{p === "" ? "/ (root)" : `/${p}`}</option>
+                ))}
+              </select>
+              <button
+                style={lb.movePickerBtn}
+                onClick={handleMove}
+                disabled={actionBusy || moveDest === srcDir}
+              >
+                {actionBusy ? "Moving…" : "Move Here"}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Delete */}
+        <button
+          style={{ ...lb.iconBtn, color: "#ff8080" }}
+          onClick={handleDelete}
+          title="Delete"
+          disabled={actionBusy}
+        >
+          <svg viewBox="0 0 20 20" fill="none" width="15" height="15">
+            <path d="M5 6h10M8 6V4h4v2M7 9v6M10 9v6M13 9v6M6 6l.75 10h6.5L14 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+
         {/* Slideshow toggle — images only */}
         {!isVideo && (
           <button
@@ -629,6 +762,13 @@ function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, se
           {Math.round(zoom * 100)}% · double-click to reset
         </div>
       )}
+
+      {/* Delete error banner (move errors show inline in the move picker) */}
+      {actionError && !showMovePicker && (
+        <div style={lb.actionErrorBanner} onClick={(e) => e.stopPropagation()}>
+          {actionError}
+        </div>
+      )}
     </div>
 
   );
@@ -693,6 +833,34 @@ const lb = {
     border: "none", cursor: "pointer",
     fontSize: "0.84rem", fontWeight: 500, fontFamily: "inherit",
     transition: "background 0.12s",
+  },
+  movePicker: {
+    position: "absolute", top: "calc(100% + 8px)", right: 0,
+    background: "rgba(20,24,36,0.95)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    minWidth: 200,
+    boxShadow: "4px 4px 0 rgba(0,0,0,0.6)",
+    padding: "0 10px 10px",
+    zIndex: 20,
+  },
+  moveSelect: {
+    width: "100%", marginBottom: 8,
+    background: "rgba(255,255,255,0.08)",
+    color: "#fff",
+  },
+  movePickerBtn: {
+    width: "100%", padding: "8px 10px",
+    background: "var(--accent)", border: "2px solid #fff",
+    color: "#0d1321", cursor: "pointer",
+    fontSize: "0.8rem", fontWeight: 700, fontFamily: "inherit",
+  },
+  actionErrorBanner: {
+    position: "absolute", bottom: 56, left: "50%", transform: "translateX(-50%)",
+    background: "rgba(178,38,30,0.92)",
+    border: "2px solid #ff8080",
+    color: "#fff", padding: "8px 16px",
+    fontSize: "0.82rem", fontWeight: 600,
+    zIndex: 20, whiteSpace: "nowrap",
   },
 };
 
@@ -1784,7 +1952,7 @@ const { user, isAdmin } = useAuth();
           {
             label: `Select All (${files.length})`,
             icon:  <CheckAllIcon />,
-            action: () => setSelected(new Set(pageFiles)),
+            action: () => setSelected(new Set(files)),
           },
         ] : []),
         "divider",
@@ -2272,6 +2440,12 @@ function handleTouchEnd() {
           onNext={() => setLightboxIndex((i) => (i + 1) % lightboxUrls.length)}
           slideshowInterval={slideshowInterval}
           setSlideshowInterval={setSlideshowInterval}
+          folderTree={folderTree}
+          onFileRemoved={() => {
+            setLightboxIndex(null);
+            loadMedia(currentPath);
+            fetch("/api/tree").then((r) => r.json()).then((d) => setFolderTree(d.tree || []));
+          }}
         />
       )}
 
@@ -2285,6 +2459,11 @@ function handleTouchEnd() {
           onNext={() => setRandomLightbox((i) => (i + 1) % randomPhotos.length)}
           slideshowInterval={slideshowInterval}
           setSlideshowInterval={setSlideshowInterval}
+          folderTree={folderTree}
+          onFileRemoved={() => {
+            setRandomLightbox(null);
+            loadRandomPhotos(randomCount, randomFolders);
+          }}
         />
       )}
 
