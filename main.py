@@ -52,6 +52,7 @@ _ALLOWED_MIME: frozenset = frozenset({
     "application/octet-stream", "binary/octet-stream", "",
 })
 _ALLOWED_EXT: tuple = (".jpg", ".jpeg", ".png", ".gif", ".mp4", ".webm", ".mkv")
+_IMAGE_EXT_RE = re.compile(r'\.(jpg|jpeg|png|gif|webp)$', re.IGNORECASE)
 
 _USERNAME_RE = re.compile(r'^[a-zA-Z0-9_\-]{3,30}$')
 
@@ -522,26 +523,6 @@ def _count_dir(path: str) -> tuple[int, int, float]:
     return count, size, last_mtime
 
 
-def _recent_files(n: int) -> list[str]:
-    found: list[tuple[float, str]] = []
-
-    def _walk(directory: str, rel: str) -> None:
-        try:
-            with os.scandir(directory) as it:
-                for e in it:
-                    if e.is_file(follow_symlinks=False) and e.name.lower().endswith(_ALLOWED_EXT):
-                        r = f"{rel}/{e.name}" if rel else e.name
-                        found.append((e.stat().st_mtime, r))
-                    elif e.is_dir(follow_symlinks=False):
-                        _walk(e.path, f"{rel}/{e.name}" if rel else e.name)
-        except OSError:
-            pass
-
-    _walk(MEDIA_DIR, "")
-    found.sort(reverse=True)
-    return [f[1] for f in found[:n]]
-
-
 # ── Admin API ─────────────────────────────────────────────────────────────────
 
 @app.get("/api/admin/stats")
@@ -579,7 +560,6 @@ def admin_stats(request: Request):
         "total_size":      total_size,
         "user_stats":      user_stats,
         "recent_activity": activity[:15],
-        "recent_files":    _recent_files(24),
     }
 
 
@@ -1026,8 +1006,6 @@ async def random_photos(
     with _index_lock:
         idx = _load_media_index()
 
-    IMAGE_EXT = re.compile(r'\.(jpg|jpeg|png|gif|webp)$', re.IGNORECASE)
-
     if folders:
         # Only paths that start with one of the selected folder keys
         # AND belong to this user or shared
@@ -1035,17 +1013,19 @@ async def random_photos(
         for folder_key, paths in idx.items():
             if any(folder_key == f or folder_key.startswith(f + "/") for f in folders):
                 if can_access_path(user, folder_key):
-                    pool.extend(p for p in paths if IMAGE_EXT.search(p))
+                    pool.extend(p for p in paths if _IMAGE_EXT_RE.search(p))
     else:
         # All files accessible to this user
         pool = []
         for folder_key, paths in idx.items():
             if can_access_path(user, folder_key):
-                pool.extend(p for p in paths if IMAGE_EXT.search(p))
+                pool.extend(p for p in paths if _IMAGE_EXT_RE.search(p))
 
-    random.shuffle(pool)
+    # random.sample is O(count) rather than shuffling the entire pool (O(n))
+    # when only a handful of photos are actually requested out of a large library.
+    picked = random.sample(pool, min(count, len(pool)))
     return {
-        "photos":    [f"/media/{p}" for p in pool[:count]],
+        "photos":    [f"/media/{p}" for p in picked],
         "available": len(pool),
         "requested": count,
     }

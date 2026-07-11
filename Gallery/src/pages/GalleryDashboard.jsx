@@ -1,4 +1,3 @@
-// pages/GalleryDashboard.jsx
 import { useState, useEffect, useCallback, useRef } from "react";
 import BaseLayout from "../components/BaseLayout";
 import Sidebar from "../components/Sidebar";
@@ -103,40 +102,43 @@ function ContextMenu({ x, y, items, onClose }) {
   );
 }
 
-/* ── Move File Modal ─────────────────────────────────────── */
-function MoveModal({ filenames, currentPath, folderTree, onClose, onMoved }) {
-  const [dest, setDest] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+/* ── Move Modal — Drive-style folder browser ───────────────
+   items: [{ srcDir, srcName }]  — each item's OWN current folder,
+   so this same modal works for single files, whole-folder moves,
+   multi-select bulk moves, and cross-folder Random-Photos moves. */
+function FolderMoveModal({ items, folderTree, onClose, onMoved }) {
+  const [browsePath, setBrowsePath] = useState("");
+  const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState("");
 
-  function flattenTree(nodes) {
-    const paths = [""];
-    function walk(list, pre) {
-      for (const n of list) {
-        const p = pre ? `${pre}/${n.name}` : n.name;
-        paths.push(p);
-        if (n.children?.length) walk(n.children, p);
-      }
+  function getChildren(path) {
+    if (!path) return folderTree || [];
+    let nodes = folderTree || [];
+    for (const part of path.split("/")) {
+      const found = nodes.find((n) => n.name === part);
+      if (!found) return [];
+      nodes = found.children || [];
     }
-    walk(nodes, "");
-    return paths;
+    return nodes;
   }
 
-  const allPaths = flattenTree(folderTree);
+  const children     = getChildren(browsePath);
+  const crumbs       = browsePath ? browsePath.split("/") : [];
+  const alreadyThere = items.every((it) => it.srcDir === browsePath);
 
-  async function move() {
-    if (dest === currentPath) return setError("Already in that folder");
+  async function moveHere() {
     setLoading(true); setError("");
     try {
-      for (const fn of filenames) {
+      for (const it of items) {
+        if (it.srcDir === browsePath) continue; // no-op — already in this folder
         const res = await fetch("/api/move", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ src_path: currentPath, filename: fn, dest_path: dest }),
+          body: JSON.stringify({ src_path: it.srcDir, filename: it.srcName, dest_path: browsePath }),
         });
         if (!res.ok) {
-          const d = await res.json();
-          setError(d.error || `Failed to move "${fn}"`);
+          const d = await res.json().catch(() => ({}));
+          setError(d.error || d.detail || `Failed to move "${it.srcName}"`);
           setLoading(false);
           return;
         }
@@ -148,29 +150,99 @@ function MoveModal({ filenames, currentPath, folderTree, onClose, onMoved }) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="glass-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="glass-modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>Move {filenames.length} item{filenames.length !== 1 ? "s" : ""}</h2>
+          <h2>Move {items.length} item{items.length !== 1 ? "s" : ""}</h2>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
           {error && <div className="error-pill">{error}</div>}
-          <label style={{ fontSize: "0.82rem", color: "var(--text-2)", fontWeight: 500 }}>
-            Destination Folder
-          </label>
-          <select className="glass-input" value={dest} onChange={(e) => setDest(e.target.value)}>
-            {allPaths.map((p) => (
-              <option key={p} value={p}>{p === "" ? "/ (root)" : `/${p}`}</option>
+
+          {/* Breadcrumb trail */}
+          <div style={fm.breadcrumb}>
+            <button style={fm.crumbBtn} onClick={() => setBrowsePath("")}>
+              <svg viewBox="0 0 20 20" fill="none" width="13" height="13">
+                <path d="M3 9.5L10 4l7 5.5M5 8v7a1 1 0 001 1h8a1 1 0 001-1V8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Home
+            </button>
+            {crumbs.map((c, i) => (
+              <span key={i} style={fm.crumbGroup}>
+                <span style={fm.crumbSep}>/</span>
+                <button style={fm.crumbBtn} onClick={() => setBrowsePath(crumbs.slice(0, i + 1).join("/"))}>
+                  {c}
+                </button>
+              </span>
             ))}
-          </select>
-          <button className="glass-btn-primary" onClick={move} disabled={loading || dest === currentPath}>
-            {loading ? "Moving…" : "Move Here"}
+          </div>
+
+          {/* Folder browser */}
+          <div style={fm.folderGrid}>
+            {children.length === 0 && (
+              <div style={fm.emptyNote}>No subfolders here</div>
+            )}
+            {children.map((node) => (
+              <button
+                key={node.name}
+                style={fm.folderTile}
+                onClick={() => setBrowsePath(browsePath ? `${browsePath}/${node.name}` : node.name)}
+                title={`Open ${node.name}`}
+              >
+                <svg viewBox="0 0 48 40" fill="none" width="32" height="27">
+                  <path
+                    d="M2 8a4 4 0 014-4h12l4 4h20a4 4 0 014 4v22a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"
+                    fill="var(--folder-fill)" stroke="var(--folder-stroke)" strokeWidth="1.4"
+                  />
+                </svg>
+                <span style={fm.folderTileName}>{node.name}</span>
+              </button>
+            ))}
+          </div>
+
+          <button className="glass-btn-primary" onClick={moveHere} disabled={loading || alreadyThere}>
+            {loading ? "Moving…" : alreadyThere ? "Already here" : `Move Here${browsePath ? ` — /${browsePath}` : " — / (root)"}`}
           </button>
         </div>
       </div>
     </div>
   );
 }
+
+const fm = {
+  breadcrumb: {
+    display: "flex", alignItems: "center", flexWrap: "wrap", gap: 4,
+    padding: "8px 10px",
+    background: "var(--bg-mid)", border: "1px solid var(--glass-border)",
+  },
+  crumbGroup: { display: "flex", alignItems: "center", gap: 4 },
+  crumbSep: { color: "var(--text-3)", fontSize: "0.8rem" },
+  crumbBtn: {
+    display: "flex", alignItems: "center", gap: 5,
+    background: "transparent", border: "none",
+    color: "var(--text-2)", cursor: "pointer",
+    fontSize: "0.8rem", fontWeight: 600, fontFamily: "inherit",
+    padding: "3px 6px",
+  },
+  folderGrid: {
+    display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))",
+    gap: 8, padding: "4px 2px", minHeight: 90, maxHeight: 260, overflowY: "auto",
+  },
+  folderTile: {
+    display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+    padding: "10px 6px",
+    background: "var(--glass-bg)", border: "1px solid var(--glass-border)",
+    cursor: "pointer", fontFamily: "inherit",
+  },
+  folderTileName: {
+    fontSize: "0.74rem", fontWeight: 600, color: "var(--text-2)",
+    textAlign: "center", overflow: "hidden", whiteSpace: "nowrap",
+    textOverflow: "ellipsis", width: "100%",
+  },
+  emptyNote: {
+    gridColumn: "1 / -1", textAlign: "center", color: "var(--text-3)",
+    fontSize: "0.8rem", padding: "20px 0",
+  },
+};
 
 /* ── Folder Card ─────────────────────────────────────────── */
 /* ── Pagination Bar ────────────────────────────────────── */
@@ -372,7 +444,6 @@ function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, se
 
   // ── Move / Delete state ──────────────────────────────
   const [showMovePicker, setShowMovePicker] = useState(false);
-  const [moveDest, setMoveDest]             = useState("");
   const [actionBusy, setActionBusy]         = useState(false);
   const [actionError, setActionError]       = useState("");
 
@@ -386,18 +457,6 @@ function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, se
   const slashIdx = relPath.lastIndexOf("/");
   const srcDir   = slashIdx >= 0 ? relPath.slice(0, slashIdx) : "";
   const srcName  = slashIdx >= 0 ? relPath.slice(slashIdx + 1) : relPath;
-
-  function flattenFolderTree(nodes) {
-    const paths = [""];
-    (function walk(list, pre) {
-      for (const n of list || []) {
-        const p = pre ? `${pre}/${n.name}` : n.name;
-        paths.push(p);
-        if (n.children?.length) walk(n.children, p);
-      }
-    })(nodes, "");
-    return paths;
-  }
 
   async function handleDelete() {
     if (!confirm(`Delete "${srcName}"? This cannot be undone.`)) return;
@@ -421,34 +480,9 @@ function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, se
     }
   }
 
-  async function handleMove() {
-    if (moveDest === srcDir) { setActionError("Already in that folder"); return; }
-    setActionBusy(true); setActionError("");
-    try {
-      const res = await fetch("/api/move", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ src_path: srcDir, filename: srcName, dest_path: moveDest }),
-      });
-      if (res.ok) {
-        setShowMovePicker(false);
-        setPlaying(false);
-        onFileRemoved?.(file);
-      } else {
-        const d = await res.json().catch(() => ({}));
-        setActionError(d.error || d.detail || "Failed to move");
-      }
-    } catch {
-      setActionError("Network error while moving");
-    } finally {
-      setActionBusy(false);
-    }
-  }
-
   // Reset move/delete UI when navigating to a different photo
   useEffect(() => {
     setShowMovePicker(false);
-    setMoveDest("");
     setActionError("");
   }, [file]);
 
@@ -582,46 +616,25 @@ function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, se
         </a>
 
         {/* Move to… */}
-        <div style={{ position: "relative" }}>
-          <button
-            style={lb.iconBtn}
-            onClick={() => { setShowMovePicker((s) => !s); setActionError(""); setMoveDest(srcDir); }}
-            title="Move to folder"
-            disabled={actionBusy}
-          >
-            <svg viewBox="0 0 20 20" fill="none" width="15" height="15">
-              <path d="M3 6a1 1 0 011-1h4l1.5 2H16a1 1 0 011 1v7a1 1 0 01-1 1H4a1 1 0 01-1-1V6z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-              <path d="M10 9v4M8 11h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-            </svg>
-          </button>
-          {showMovePicker && (
-            <div style={lb.movePicker}>
-              <div style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.5)", padding: "6px 10px 4px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Move to
-              </div>
-              {actionError && (
-                <div style={{ fontSize: "0.74rem", color: "#ff6b6b", padding: "2px 10px 8px" }}>{actionError}</div>
-              )}
-              <select
-                className="glass-input"
-                style={lb.moveSelect}
-                value={moveDest}
-                onChange={(e) => setMoveDest(e.target.value)}
-              >
-                {flattenFolderTree(folderTree).map((p) => (
-                  <option key={p} value={p}>{p === "" ? "/ (root)" : `/${p}`}</option>
-                ))}
-              </select>
-              <button
-                style={lb.movePickerBtn}
-                onClick={handleMove}
-                disabled={actionBusy || moveDest === srcDir}
-              >
-                {actionBusy ? "Moving…" : "Move Here"}
-              </button>
-            </div>
-          )}
-        </div>
+        <button
+          style={lb.iconBtn}
+          onClick={() => { setShowMovePicker(true); setActionError(""); }}
+          title="Move to folder"
+          disabled={actionBusy}
+        >
+          <svg viewBox="0 0 20 20" fill="none" width="15" height="15">
+            <path d="M3 6a1 1 0 011-1h4l1.5 2H16a1 1 0 011 1v7a1 1 0 01-1 1H4a1 1 0 01-1-1V6z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+            <path d="M10 9v4M8 11h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+        </button>
+        {showMovePicker && (
+          <FolderMoveModal
+            items={[{ srcDir, srcName }]}
+            folderTree={folderTree}
+            onClose={() => setShowMovePicker(false)}
+            onMoved={() => { setPlaying(false); onFileRemoved?.(file); }}
+          />
+        )}
 
         {/* Delete */}
         <button
@@ -833,26 +846,6 @@ const lb = {
     border: "none", cursor: "pointer",
     fontSize: "0.84rem", fontWeight: 500, fontFamily: "inherit",
     transition: "background 0.12s",
-  },
-  movePicker: {
-    position: "absolute", top: "calc(100% + 8px)", right: 0,
-    background: "rgba(20,24,36,0.95)",
-    border: "1px solid rgba(255,255,255,0.12)",
-    minWidth: 200,
-    boxShadow: "4px 4px 0 rgba(0,0,0,0.6)",
-    padding: "0 10px 10px",
-    zIndex: 20,
-  },
-  moveSelect: {
-    width: "100%", marginBottom: 8,
-    background: "rgba(255,255,255,0.08)",
-    color: "#fff",
-  },
-  movePickerBtn: {
-    width: "100%", padding: "8px 10px",
-    background: "var(--accent)", border: "2px solid #fff",
-    color: "#0d1321", cursor: "pointer",
-    fontSize: "0.8rem", fontWeight: 700, fontFamily: "inherit",
   },
   actionErrorBanner: {
     position: "absolute", bottom: 56, left: "50%", transform: "translateX(-50%)",
@@ -1811,16 +1804,6 @@ const { user, isAdmin } = useAuth();
     finally { setRandomLoading(false); }
   }, [isAdmin, randomFolders]);
 
-  function flattenFolderTree(nodes, prefix = "") {
-    const out = [];
-    for (const n of nodes) {
-      const p = prefix ? `${prefix}/${n.name}` : n.name;
-      out.push(p);
-      if (n.children?.length) out.push(...flattenFolderTree(n.children, p));
-    }
-    return out;
-  }
-
   useEffect(() => {
     if (currentPath === "" && !isAdmin) loadRandomPhotos(randomCount);
   }, [currentPath, isAdmin]);
@@ -1948,7 +1931,7 @@ const { user, isAdmin } = useAuth();
           icon:  <CheckIcon />,
           action: () => toggleSelectFile(filename),
         },
-        ...(totalSelected > 1 ? [
+        ...(files.length > 1 ? [
           {
             label: `Select All (${files.length})`,
             icon:  <CheckAllIcon />,
@@ -1971,7 +1954,7 @@ const { user, isAdmin } = useAuth();
         {
           label: "Move to…",
           icon:  <MoveIcon />,
-          action: () => setMoveTarget({ filename, isFolder: false }),
+          action: () => setMoveTarget({ items: [{ srcDir: currentPath, srcName: filename }] }),
         },
         "divider",
         {
@@ -2015,7 +1998,7 @@ const { user, isAdmin } = useAuth();
         {
           label: "Move to…",
           icon:  <MoveIcon />,
-          action: () => setMoveTarget({ filename: folderName, isFolder: true }),
+          action: () => setMoveTarget({ items: [{ srcDir: currentPath, srcName: folderName }] }),
         },
         "divider",
         {
@@ -2286,7 +2269,9 @@ function handleTouchEnd() {
             {totalSelected > 0 && (
                 <button
                   style={gs.selAction}
-                  onClick={() => setMoveTarget({ filenames: [...selected, ...selectedFolders] })}
+                  onClick={() => setMoveTarget({
+                    items: [...selected, ...selectedFolders].map((name) => ({ srcDir: currentPath, srcName: name })),
+                  })}
                 >
                 <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
                   <path d="M4 10h12M12 6l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -2478,9 +2463,8 @@ function handleTouchEnd() {
 
       {/* ── Move modal ───────────────────────────────────── */}
       {moveTarget && (
-        <MoveModal
-          filenames={moveTarget.filenames}
-          currentPath={currentPath}
+        <FolderMoveModal
+          items={moveTarget.items}
           folderTree={folderTree}
           onClose={() => setMoveTarget(null)}
           onMoved={() => {

@@ -1,7 +1,3 @@
-// components/BaseLayout.jsx
-// Provides the ambient background orbs and base body wrapper.
-// Wrap every page (authenticated or not) with this.
-
 export default function BaseLayout({ children }) {
   return (
     <div style={{ position: "relative", minHeight: "100dvh" }}>

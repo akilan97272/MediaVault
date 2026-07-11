@@ -1,4 +1,3 @@
-// pages/Login.jsx
 import { useState } from "react";
 import BaseLayout from "../components/BaseLayout";
 import { useTheme } from "../context/ThemeContext";

@@ -1,8 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 
 const ThemeContext = createContext();
-
-// Three brutalist themes, cycled in this order.
 const THEME_ORDER = ["dark", "light", "refresh"];
 
 export function ThemeProvider({ children }) {

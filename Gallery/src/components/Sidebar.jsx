@@ -1,7 +1,3 @@
-// components/Sidebar.jsx
-// Desktop: floating glass sidebar with rounded edges (Apple-style)
-// Mobile: collapsible bottom sheet triggered by a floating nav bar
-
 import { useState, useEffect, useRef } from "react";
 import { useTheme } from "../context/ThemeContext";
 

@@ -1,4 +1,3 @@
-// pages/NotFound.jsx
 import BaseLayout from "../components/BaseLayout";
 
 export default function NotFound() {

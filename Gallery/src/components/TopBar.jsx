@@ -1,4 +1,3 @@
-// components/TopBar.jsx
 import { useEffect, useState } from "react";
 import { useTheme } from "../context/ThemeContext";
 
