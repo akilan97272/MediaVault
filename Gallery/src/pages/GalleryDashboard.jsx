@@ -1312,161 +1312,117 @@ function ActivityLogModal({ onClose }) {
 /* ── Random Photos Widget ────────────────────────────────── */
 const RANDOM_COUNTS = [10, 20, 30, 40, 50];
 
-function flattenFolderTreeForPicker(nodes, prefix = "") {
-  const out = [];
-  for (const n of nodes) {
-    const p = prefix ? `${prefix}/${n.name}` : n.name;
-    out.push({ path: p, name: n.name, depth: prefix.split("/").filter(Boolean).length });
-    if (n.children?.length) out.push(...flattenFolderTreeForPicker(n.children, p));
+function FolderSourceModal({ folderTree, selectedFolders, onChange, onClose }) {
+  const [browsePath, setBrowsePath]         = useState("");
+  const [localSelected, setLocalSelected]   = useState(selectedFolders);
+  const isAll = localSelected.includes("__all__");
+
+  function getChildren(path) {
+    if (!path) return folderTree || [];
+    let nodes = folderTree || [];
+    for (const part of path.split("/")) {
+      const found = nodes.find((n) => n.name === part);
+      if (!found) return [];
+      nodes = found.children || [];
+    }
+    return nodes;
   }
-  return out;
-}
 
-function FolderPickerDropdown({ folderTree, selectedFolders, onChange, onClose }) {
-  const ref         = useRef(null);
-  const allFolders  = flattenFolderTreeForPicker(folderTree);
-  const isAll       = selectedFolders.includes("__all__");
-
-  useEffect(() => {
-    const close = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) onClose();
-    };
-    window.addEventListener("mousedown", close);
-    window.addEventListener("touchstart", close);
-    return () => {
-      window.removeEventListener("mousedown", close);
-      window.removeEventListener("touchstart", close);
-    };
-  }, [onClose]);
-
-  function toggleAll() { onChange(["__all__"]); }
+  function toggleAll() { setLocalSelected(["__all__"]); }
   function toggleFolder(path) {
-    if (isAll) { onChange([path]); return; }
-    const has  = selectedFolders.includes(path);
-    const next = has ? selectedFolders.filter((p) => p !== path) : [...selectedFolders, path];
-    onChange(next.length ? next : ["__all__"]);
+    if (isAll) { setLocalSelected([path]); return; }
+    const has  = localSelected.includes(path);
+    const next = has ? localSelected.filter((p) => p !== path) : [...localSelected, path];
+    setLocalSelected(next.length ? next : ["__all__"]);
   }
+
+  // Only fetch a new batch of photos once, when the picker actually closes —
+  // not on every individual checkbox click, which would fire one network
+  // request per folder selected instead of one for the whole selection.
+  function applyAndClose() {
+    const changed = localSelected.length !== selectedFolders.length ||
+      localSelected.some((f) => !selectedFolders.includes(f));
+    if (changed) onChange(localSelected);
+    onClose();
+  }
+
+  const children = getChildren(browsePath);
+  const crumbs   = browsePath ? browsePath.split("/") : [];
 
   return (
-    <div
-      ref={ref}
-      style={{
-        // Floats right below the button (anchored via plain CSS, not JS
-        // rect math), but is capped at a fixed pixel height with its own
-        // scrollbar below — a plain block element with maxHeight+overflow
-        // always clips correctly, no flexbox sizing involved at all.
-        position: "absolute",
-        top: "calc(100% + 6px)",
-        right: 0,
-        width: 220,
-        maxWidth: "calc(100vw - 32px)",
-        maxHeight: 280,
-        zIndex: 50,
-        background: "var(--bg-mid)",
-        border: "1px solid var(--glass-border)",
-        borderRadius: 14,
-        boxShadow: "0 1px 0 var(--glass-shine) inset, 0 20px 60px rgba(0,0,0,0.45)",
-        overflow: "hidden",                     // clips the whole panel to its own rounded box
-        contain: "paint",                       // hard browser-level guarantee: nothing inside
-                                                  // this box can ever paint outside its bounds
-        boxSizing: "border-box",
-        display: "block",
-      }}
-    >
-      {/* Header — fixed, never scrolls */}
-      <div style={{
-        fontSize: "0.68rem", fontWeight: 700,
-        textTransform: "uppercase", letterSpacing: "0.08em",
-        color: "var(--text-1)",
-        padding: "10px 14px 6px",
-        borderBottom: "1px solid var(--glass-border)",
-      }}>
-        Photo source
-      </div>
+    <div className="modal-overlay" onClick={applyAndClose}>
+      <div className="glass-modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Photo Source</h2>
+          <button className="modal-close" onClick={applyAndClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          {/* All folders — quick toggle, same semantics as before */}
+          <button style={fsm.allRow} onClick={toggleAll}>
+            <span style={{ ...fsm.checkbox, ...(isAll ? fsm.checkboxActive : null) }}>
+              {isAll && <CheckMark />}
+            </span>
+            <span style={{ fontWeight: 600, color: isAll ? "var(--accent)" : "var(--text-1)" }}>
+              All folders
+            </span>
+          </button>
 
-      {/* Scrollable list — plain block with an explicit maxHeight, so it
-          always clips/scrolls correctly with zero flexbox sizing quirks */}
-      <div style={{
-        display: "block",
-        overflowY: "scroll",
-        overflowX: "hidden",
-        maxHeight: 232,                        // header (~40px) + this ≈ panel's 280px cap
-        WebkitOverflowScrolling: "touch",      // smooth momentum scroll on iOS
-        overscrollBehavior: "contain",         // don't let the scroll leak to the page behind it
-        paddingBottom: 6,
-        // Custom scrollbar styling
-        scrollbarWidth: "thin",
-        scrollbarColor: "var(--glass-border) transparent",
-      }}>
-        {/* All folders option */}
-        <button
-          style={{
-            width: "100%", display: "flex", alignItems: "center", gap: 8,
-            padding: "8px 14px",
-            background: isAll ? "var(--accent-bg)" : "transparent",
-            border: "none", cursor: "pointer", textAlign: "left",
-            fontFamily: "inherit", fontSize: "0.84rem", fontWeight: 600,
-            color: isAll ? "var(--accent)" : "var(--text-1)",
-            transition: "background 0.12s",
-          }}
-          onClick={toggleAll}
-        >
-          <span style={{
-            width: 15, height: 15, borderRadius: 4, flexShrink: 0,
-            border: isAll ? "1.5px solid var(--accent)" : "1.5px solid var(--text-3)",
-            background: isAll ? "var(--accent-bg)" : "transparent",
-            display: "flex", alignItems: "center", justifyContent: "center",
-          }}>
-            {isAll && <CheckMark />}
-          </span>
-          All folders
-        </button>
-
-        {/* Individual folders */}
-        {allFolders.map((f) => {
-          const active = !isAll && selectedFolders.includes(f.path);
-          return (
-            <button
-              key={f.path}
-              style={{
-                width: "100%", display: "flex", alignItems: "center", gap: 8,
-                padding: "7px 14px",
-                paddingLeft: 12 + f.depth * 14,
-                background: active ? "var(--accent-bg)" : "transparent",
-                border: "none", cursor: "pointer", textAlign: "left",
-                fontFamily: "inherit", fontSize: "0.82rem", fontWeight: active ? 600 : 400,
-                color: active ? "var(--accent)" : "var(--text-1)",
-                transition: "background 0.12s",
-                // Clip long names inside the box
-                overflow: "hidden",
-                whiteSpace: "nowrap",
-                textOverflow: "ellipsis",
-                maxWidth: "100%",
-                boxSizing: "border-box",
-              }}
-              onClick={() => toggleFolder(f.path)}
-            >
-              <span style={{
-                width: 15, height: 15, borderRadius: 4, flexShrink: 0,
-                border: active ? "1.5px solid var(--accent)" : "1.5px solid var(--text-3)",
-                background: active ? "var(--accent-bg)" : "transparent",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                minWidth: 15,
-              }}>
-                {active && <CheckMark />}
-              </span>
-              <span style={{
-                overflow: "hidden",
-                whiteSpace: "nowrap",
-                textOverflow: "ellipsis",
-                flex: 1,
-                minWidth: 0,
-              }}>
-                {f.name}
-              </span>
+          {/* Breadcrumb trail — browse in to see subfolders */}
+          <div style={fm.breadcrumb}>
+            <button style={fm.crumbBtn} onClick={() => setBrowsePath("")}>
+              <svg viewBox="0 0 20 20" fill="none" width="13" height="13">
+                <path d="M3 9.5L10 4l7 5.5M5 8v7a1 1 0 001 1h8a1 1 0 001-1V8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Home
             </button>
-          );
-        })}
+            {crumbs.map((c, i) => (
+              <span key={i} style={fm.crumbGroup}>
+                <span style={fm.crumbSep}>/</span>
+                <button style={fm.crumbBtn} onClick={() => setBrowsePath(crumbs.slice(0, i + 1).join("/"))}>
+                  {c}
+                </button>
+              </span>
+            ))}
+          </div>
+
+          {/* Folder tiles — click the checkbox to select as a source,
+              click the folder itself to browse into its subfolders */}
+          <div style={fm.folderGrid}>
+            {children.length === 0 && (
+              <div style={fm.emptyNote}>No subfolders here</div>
+            )}
+            {children.map((node) => {
+              const path    = browsePath ? `${browsePath}/${node.name}` : node.name;
+              const checked = !isAll && localSelected.includes(path);
+              return (
+                <div key={node.name} style={fsm.tile}>
+                  <button
+                    style={{ ...fsm.checkbox, ...(checked ? fsm.checkboxActive : null), ...fsm.tileCheckbox }}
+                    onClick={() => toggleFolder(path)}
+                    title={checked ? "Remove from selection" : "Add as photo source"}
+                  >
+                    {checked && <CheckMark />}
+                  </button>
+                  <button
+                    style={fsm.tileOpen}
+                    onClick={() => setBrowsePath(path)}
+                    title={`Open ${node.name}`}
+                  >
+                    <svg viewBox="0 0 48 40" fill="none" width="30" height="25">
+                      <path
+                        d="M2 8a4 4 0 014-4h12l4 4h20a4 4 0 014 4v22a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"
+                        fill="var(--folder-fill)" stroke="var(--folder-stroke)" strokeWidth="1.4"
+                      />
+                    </svg>
+                    <span style={fm.folderTileName}>{node.name}</span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          <button className="glass-btn-primary" onClick={applyAndClose}>Done</button>
+        </div>
       </div>
     </div>
   );
@@ -1478,39 +1434,38 @@ const CheckMark = () => (
   </svg>
 );
 
-const fp = {
-  dropdown: {
-    position: "absolute", top: "calc(100% + 6px)", right: 0,
-    background: "var(--glass-bg)",
-    backdropFilter: "blur(24px) saturate(200%)",
-    WebkitBackdropFilter: "blur(24px) saturate(200%)",
-    border: "1px solid var(--glass-border)",
-    borderRadius: 14, minWidth: 200, maxHeight: 280,
-    /* On narrow screens, don't bleed off the left edge of the viewport */
-    maxWidth: "calc(100vw - 16px)",
-    boxShadow: "0 1px 0 var(--glass-shine) inset, 0 16px 48px var(--glass-shadow)",
-    zIndex: 50, overflow: "hidden",
-    display: "flex", flexDirection: "column",
+const fsm = {
+  allRow: {
+    display: "flex", alignItems: "center", gap: 8,
+    padding: "10px 12px",
+    background: "var(--glass-bg)", border: "1px solid var(--glass-border)",
+    cursor: "pointer", fontFamily: "inherit", fontSize: "0.86rem",
+    width: "100%", textAlign: "left",
   },
-  header: {
-    fontSize: "0.68rem", fontWeight: 700, textTransform: "uppercase",
-    letterSpacing: "0.08em", color: "var(--text-3)",
-    padding: "10px 14px 6px",
-  },
-  list: { overflowY: "auto", paddingBottom: 6 },
-  item: {
-    width: "100%", display: "flex", alignItems: "center", gap: 8,
-    padding: "7px 14px", background: "transparent", border: "none",
-    color: "var(--text-2)", cursor: "pointer", textAlign: "left",
-    fontFamily: "inherit", fontSize: "0.82rem", fontWeight: 500,
-    transition: "background 0.12s, color 0.12s",
-  },
-  itemActive: { color: "var(--accent)", background: "var(--accent-bg)" },
   checkbox: {
-    width: 14, height: 14, borderRadius: 4,
-    border: "1.5px solid var(--glass-border)",
+    width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+    border: "1.5px solid var(--text-3)",
+    background: "transparent",
     display: "flex", alignItems: "center", justifyContent: "center",
-    flexShrink: 0,
+  },
+  checkboxActive: {
+    border: "1.5px solid var(--accent)",
+    background: "var(--accent-bg)",
+  },
+  tile: {
+    position: "relative",
+    display: "flex", flexDirection: "column", alignItems: "center",
+    background: "var(--glass-bg)", border: "1px solid var(--glass-border)",
+  },
+  tileCheckbox: {
+    position: "absolute", top: 6, left: 6, zIndex: 2,
+    background: "var(--bg-mid)",
+  },
+  tileOpen: {
+    width: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+    padding: "10px 6px",
+    background: "transparent", border: "none",
+    cursor: "pointer", fontFamily: "inherit",
   },
 };
 
@@ -1574,34 +1529,29 @@ function RandomPhotosWidget({
             Shuffle
           </button>
 
-          {/* Folder picker */}
-          <div style={{ position: "relative" }}>
-            <button
-              style={rw.refreshBtn}
-              title="Choose folders"
-              onMouseDown={(e) => {
-                e.stopPropagation();
-                setShowFolderPicker((s) => !s);
-              }}
-            >
-              <svg viewBox="0 0 20 20" fill="none" width="13" height="13">
-                <path d="M2 6a2 2 0 012-2h3.586a1 1 0 01.707.293L9.414 5.5H16a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" stroke="currentColor" strokeWidth="1.4" />
-              </svg>
-              Folders
-              {!selectedFolders.includes("__all__") && (
-                <span style={rw.folderBadge}>{selectedFolders.length}</span>
-              )}
-            </button>
-
-            {showFolderPicker && (
-              <FolderPickerDropdown
-                folderTree={folderTree}
-                selectedFolders={selectedFolders}
-                onChange={onFoldersChange}
-                onClose={() => setShowFolderPicker(false)}
-              />
+          {/* Folder picker — opens the same Drive-style modal used for Move to */}
+          <button
+            style={rw.refreshBtn}
+            title="Choose folders"
+            onClick={() => setShowFolderPicker(true)}
+          >
+            <svg viewBox="0 0 20 20" fill="none" width="13" height="13">
+              <path d="M2 6a2 2 0 012-2h3.586a1 1 0 01.707.293L9.414 5.5H16a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" stroke="currentColor" strokeWidth="1.4" />
+            </svg>
+            Folders
+            {!selectedFolders.includes("__all__") && (
+              <span style={rw.folderBadge}>{selectedFolders.length}</span>
             )}
-          </div>
+          </button>
+
+          {showFolderPicker && (
+            <FolderSourceModal
+              folderTree={folderTree}
+              selectedFolders={selectedFolders}
+              onChange={onFoldersChange}
+              onClose={() => setShowFolderPicker(false)}
+            />
+          )}
         </div>
       </div>
 
@@ -1737,6 +1687,9 @@ const rw = {
   },
   thumb: {
     position: "relative",
+    display: "block",
+    isolation: "isolate",              // own stacking context — nothing from
+                                        // outside can paint over/under it oddly
     width: "100%",
     paddingTop: "100%", // bulletproof 1:1 square — height derives purely from width
     borderRadius: 10,
@@ -1745,6 +1698,7 @@ const rw = {
     border: "1px solid var(--glass-border)",
     transition: "transform 0.15s, box-shadow 0.15s",
     background: "rgba(128,128,128,0.07)",
+    boxSizing: "border-box",
   },
   img: {
     position: "absolute",
