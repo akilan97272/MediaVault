@@ -1,3 +1,4 @@
+// pages/GalleryDashboard.jsx
 import { useState, useEffect, useCallback, useRef } from "react";
 import BaseLayout from "../components/BaseLayout";
 import Sidebar from "../components/Sidebar";
@@ -107,19 +108,39 @@ function ContextMenu({ x, y, items, onClose }) {
    so this same modal works for single files, whole-folder moves,
    multi-select bulk moves, and cross-folder Random-Photos moves. */
 function FolderMoveModal({ items, folderTree, onClose, onMoved }) {
-  const [browsePath, setBrowsePath] = useState("");
-  const [loading, setLoading]       = useState(false);
-  const [error, setError]           = useState("");
+  const [browsePath, setBrowsePath]           = useState("");
+  const [loading, setLoading]                 = useState(false);
+  const [error, setError]                     = useState("");
+  // Local, patchable copy of the tree so a folder created from inside this
+  // dialog shows up immediately without waiting on a parent refetch.
+  const [localTree, setLocalTree]             = useState(folderTree || []);
+  const [showCreateFolder, setShowCreateFolder] = useState(false);
+
+  useEffect(() => { setLocalTree(folderTree || []); }, [folderTree]);
 
   function getChildren(path) {
-    if (!path) return folderTree || [];
-    let nodes = folderTree || [];
+    if (!path) return localTree;
+    let nodes = localTree;
     for (const part of path.split("/")) {
       const found = nodes.find((n) => n.name === part);
       if (!found) return [];
       nodes = found.children || [];
     }
     return nodes;
+  }
+
+  function insertFolderNode(nodes, path, newName) {
+    if (!path) return [...nodes, { name: newName, children: [] }];
+    const [head, ...rest] = path.split("/");
+    return nodes.map((n) =>
+      n.name !== head ? n : { ...n, children: insertFolderNode(n.children || [], rest.join("/"), newName) }
+    );
+  }
+
+  function handleFolderCreated(newName) {
+    setLocalTree((t) => insertFolderNode(t, browsePath, newName));
+    // Drive-style: hop straight into the folder you just made
+    setBrowsePath(browsePath ? `${browsePath}/${newName}` : newName);
   }
 
   const children     = getChildren(browsePath);
@@ -158,22 +179,31 @@ function FolderMoveModal({ items, folderTree, onClose, onMoved }) {
         <div className="modal-body">
           {error && <div className="error-pill">{error}</div>}
 
-          {/* Breadcrumb trail */}
-          <div style={fm.breadcrumb}>
-            <button style={fm.crumbBtn} onClick={() => setBrowsePath("")}>
+          {/* Breadcrumb trail + New Folder */}
+          <div style={fm.breadcrumbRow}>
+            <div style={fm.breadcrumb}>
+              <button style={fm.crumbBtn} onClick={() => setBrowsePath("")}>
+                <svg viewBox="0 0 20 20" fill="none" width="13" height="13">
+                  <path d="M3 9.5L10 4l7 5.5M5 8v7a1 1 0 001 1h8a1 1 0 001-1V8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Home
+              </button>
+              {crumbs.map((c, i) => (
+                <span key={i} style={fm.crumbGroup}>
+                  <span style={fm.crumbSep}>/</span>
+                  <button style={fm.crumbBtn} onClick={() => setBrowsePath(crumbs.slice(0, i + 1).join("/"))}>
+                    {c}
+                  </button>
+                </span>
+              ))}
+            </div>
+            <button style={fm.newFolderBtn} onClick={() => setShowCreateFolder(true)} title="Create new folder here">
               <svg viewBox="0 0 20 20" fill="none" width="13" height="13">
-                <path d="M3 9.5L10 4l7 5.5M5 8v7a1 1 0 001 1h8a1 1 0 001-1V8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M3 6a1 1 0 011-1h4l1.5 2H16a1 1 0 011 1v7a1 1 0 01-1 1H4a1 1 0 01-1-1V6z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                <path d="M10 8.5v3.5M8.25 10.25h3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
               </svg>
-              Home
+              New Folder
             </button>
-            {crumbs.map((c, i) => (
-              <span key={i} style={fm.crumbGroup}>
-                <span style={fm.crumbSep}>/</span>
-                <button style={fm.crumbBtn} onClick={() => setBrowsePath(crumbs.slice(0, i + 1).join("/"))}>
-                  {c}
-                </button>
-              </span>
-            ))}
           </div>
 
           {/* Folder browser */}
@@ -204,15 +234,35 @@ function FolderMoveModal({ items, folderTree, onClose, onMoved }) {
           </button>
         </div>
       </div>
+
+      {showCreateFolder && (
+        <CreateFolderModal
+          currentPath={browsePath}
+          onClose={() => setShowCreateFolder(false)}
+          onCreated={handleFolderCreated}
+        />
+      )}
     </div>
   );
 }
 
 const fm = {
+  breadcrumbRow: {
+    display: "flex", alignItems: "stretch", gap: 8,
+  },
   breadcrumb: {
+    flex: 1, minWidth: 0,
     display: "flex", alignItems: "center", flexWrap: "wrap", gap: 4,
     padding: "8px 10px",
     background: "var(--bg-mid)", border: "1px solid var(--glass-border)",
+  },
+  newFolderBtn: {
+    display: "flex", alignItems: "center", gap: 6, flexShrink: 0,
+    padding: "8px 12px",
+    background: "var(--accent-bg)", border: "1px solid var(--glass-border)",
+    color: "var(--text-1)", cursor: "pointer",
+    fontSize: "0.78rem", fontWeight: 700, fontFamily: "inherit",
+    whiteSpace: "nowrap",
   },
   crumbGroup: { display: "flex", alignItems: "center", gap: 4 },
   crumbSep: { color: "var(--text-3)", fontSize: "0.8rem" },
@@ -1272,25 +1322,14 @@ function flattenFolderTreeForPicker(nodes, prefix = "") {
   return out;
 }
 
-function FolderPickerDropdown({ folderTree, selectedFolders, onChange, onClose, anchorRef }) {
-  const ref        = useRef(null);
-  const [rect, setRect] = useState(() =>
-    anchorRef?.current ? anchorRef.current.getBoundingClientRect() : null
-  );
-  const allFolders = flattenFolderTreeForPicker(folderTree);
-  const isAll      = selectedFolders.includes("__all__");
-
-  // useLayoutEffect so position is set before first paint — no flash at -9999
-  useEffect(() => {
-    if (anchorRef?.current) setRect(anchorRef.current.getBoundingClientRect());
-  }, []);
+function FolderPickerDropdown({ folderTree, selectedFolders, onChange, onClose }) {
+  const ref         = useRef(null);
+  const allFolders  = flattenFolderTreeForPicker(folderTree);
+  const isAll       = selectedFolders.includes("__all__");
 
   useEffect(() => {
     const close = (e) => {
-      if (ref.current && !ref.current.contains(e.target) &&
-          anchorRef?.current && !anchorRef.current.contains(e.target)) {
-        onClose();
-      }
+      if (ref.current && !ref.current.contains(e.target)) onClose();
     };
     window.addEventListener("mousedown", close);
     window.addEventListener("touchstart", close);
@@ -1298,7 +1337,7 @@ function FolderPickerDropdown({ folderTree, selectedFolders, onChange, onClose, 
       window.removeEventListener("mousedown", close);
       window.removeEventListener("touchstart", close);
     };
-  }, [onClose, anchorRef]);
+  }, [onClose]);
 
   function toggleAll() { onChange(["__all__"]); }
   function toggleFolder(path) {
@@ -1308,48 +1347,52 @@ function FolderPickerDropdown({ folderTree, selectedFolders, onChange, onClose, 
     onChange(next.length ? next : ["__all__"]);
   }
 
-  const W  = 220;
-  const vw = typeof window !== "undefined" ? window.innerWidth : 400;
-  const top  = rect ? rect.bottom + 6 : -9999;
-  const left = rect ? Math.min(Math.max(rect.right - W, 8), vw - W - 8) : -9999;
-
   return (
     <div
       ref={ref}
       style={{
-        position: "fixed",
-        top, left,
-        width: W,
-        zIndex: 9999,
-        background: "var(--bg-mid)",           // solid base, not just glass — ensures text contrast in both themes
-        backdropFilter: "blur(24px) saturate(200%)",
-        WebkitBackdropFilter: "blur(24px) saturate(200%)",
+        // Floats right below the button (anchored via plain CSS, not JS
+        // rect math), but is capped at a fixed pixel height with its own
+        // scrollbar below — a plain block element with maxHeight+overflow
+        // always clips correctly, no flexbox sizing involved at all.
+        position: "absolute",
+        top: "calc(100% + 6px)",
+        right: 0,
+        width: 220,
+        maxWidth: "calc(100vw - 32px)",
+        maxHeight: 280,
+        zIndex: 50,
+        background: "var(--bg-mid)",
         border: "1px solid var(--glass-border)",
-        borderRadius: 16,
-        display: "flex",
-        flexDirection: "column",
+        borderRadius: 14,
         boxShadow: "0 1px 0 var(--glass-shine) inset, 0 20px 60px rgba(0,0,0,0.45)",
-        overflow: "hidden",                     // clips border-radius cleanly
-        maxHeight: "min(300px, 60vh)",
+        overflow: "hidden",                     // clips the whole panel to its own rounded box
+        contain: "paint",                       // hard browser-level guarantee: nothing inside
+                                                  // this box can ever paint outside its bounds
+        boxSizing: "border-box",
+        display: "block",
       }}
     >
       {/* Header — fixed, never scrolls */}
       <div style={{
         fontSize: "0.68rem", fontWeight: 700,
         textTransform: "uppercase", letterSpacing: "0.08em",
-        color: "var(--text-1)",                // was text-3 — too faint
+        color: "var(--text-1)",
         padding: "10px 14px 6px",
         borderBottom: "1px solid var(--glass-border)",
-        flexShrink: 0,
       }}>
         Photo source
       </div>
 
-      {/* Scrollable list — constrained inside the dropdown */}
+      {/* Scrollable list — plain block with an explicit maxHeight, so it
+          always clips/scrolls correctly with zero flexbox sizing quirks */}
       <div style={{
-        overflowY: "auto",
+        display: "block",
+        overflowY: "scroll",
         overflowX: "hidden",
-        flex: 1,                               // takes remaining height after header
+        maxHeight: 232,                        // header (~40px) + this ≈ panel's 280px cap
+        WebkitOverflowScrolling: "touch",      // smooth momentum scroll on iOS
+        overscrollBehavior: "contain",         // don't let the scroll leak to the page behind it
         paddingBottom: 6,
         // Custom scrollbar styling
         scrollbarWidth: "thin",
@@ -1363,7 +1406,7 @@ function FolderPickerDropdown({ folderTree, selectedFolders, onChange, onClose, 
             background: isAll ? "var(--accent-bg)" : "transparent",
             border: "none", cursor: "pointer", textAlign: "left",
             fontFamily: "inherit", fontSize: "0.84rem", fontWeight: 600,
-            color: isAll ? "var(--accent)" : "var(--text-1)",  // text-1 not text-2
+            color: isAll ? "var(--accent)" : "var(--text-1)",
             transition: "background 0.12s",
           }}
           onClick={toggleAll}
@@ -1392,13 +1435,14 @@ function FolderPickerDropdown({ folderTree, selectedFolders, onChange, onClose, 
                 background: active ? "var(--accent-bg)" : "transparent",
                 border: "none", cursor: "pointer", textAlign: "left",
                 fontFamily: "inherit", fontSize: "0.82rem", fontWeight: active ? 600 : 400,
-                color: active ? "var(--accent)" : "var(--text-1)",  // always text-1
+                color: active ? "var(--accent)" : "var(--text-1)",
                 transition: "background 0.12s",
                 // Clip long names inside the box
                 overflow: "hidden",
                 whiteSpace: "nowrap",
                 textOverflow: "ellipsis",
                 maxWidth: "100%",
+                boxSizing: "border-box",
               }}
               onClick={() => toggleFolder(f.path)}
             >
@@ -1475,7 +1519,6 @@ function RandomPhotosWidget({
   folderTree, selectedFolders, onFoldersChange,
   showFolderPicker, setShowFolderPicker,
 }) {
-  const folderBtnRef = useRef(null);
   const shortfall = typeof available === "number" && available < count;
   return (
     <div style={{ ...rw.wrap, position: "relative" }} className="glass-card rw-wrap-override">
@@ -1534,7 +1577,6 @@ function RandomPhotosWidget({
           {/* Folder picker */}
           <div style={{ position: "relative" }}>
             <button
-              ref={folderBtnRef}
               style={rw.refreshBtn}
               title="Choose folders"
               onMouseDown={(e) => {
@@ -1557,7 +1599,6 @@ function RandomPhotosWidget({
                 selectedFolders={selectedFolders}
                 onChange={onFoldersChange}
                 onClose={() => setShowFolderPicker(false)}
-                anchorRef={folderBtnRef}
               />
             )}
           </div>
@@ -1623,8 +1664,6 @@ const rw = {
     borderBottom: "1px solid var(--glass-border)",
     gap: 10,
     flexWrap: "wrap",
-    /* ensure the folder-picker dropdown can escape this container */
-    overflow: "visible",
   },
   titleRow: {
     display: "flex",
