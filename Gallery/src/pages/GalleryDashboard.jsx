@@ -587,7 +587,7 @@ function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, se
       <div
         style={{
           ...lb.content,
-          overflow: "hidden",
+          overflow: "visible",
           cursor: !isVideo && zoom > 1 ? (dragState.current.dragging ? "grabbing" : "grab") : "default",
         }}
         onClick={(e) => e.stopPropagation()}
@@ -1531,12 +1531,14 @@ const rw = {
   },
   grid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))",
-    gap: 6,
-    padding: 10,
+    gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+    gap: 10,
+    padding: 12,
   },
   thumb: {
-    aspectRatio: "1",
+    position: "relative",
+    width: "100%",
+    paddingTop: "100%", // bulletproof 1:1 square — height derives purely from width
     borderRadius: 10,
     overflow: "hidden",
     cursor: "pointer",
@@ -1545,6 +1547,8 @@ const rw = {
     background: "rgba(128,128,128,0.07)",
   },
   img: {
+    position: "absolute",
+    inset: 0,
     width: "100%",
     height: "100%",
     objectFit: "cover",
@@ -2015,7 +2019,7 @@ function handleTouchEnd() {
           to   { width: 100%; }
         }
         @keyframes rwSpin { to { transform: rotate(360deg); } }
-        .rw-thumb:hover { transform: scale(1.04); box-shadow: 0 4px 16px var(--glass-shadow); }
+        .rw-thumb:hover { box-shadow: 3px 3px 0 var(--glass-shadow); }
         .rw-thumb:hover img { transform: scale(1.06); }
         @media (max-width: 767px) {
           .rw-grid { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)) !important; gap: 5px !important; padding: 8px !important; }
