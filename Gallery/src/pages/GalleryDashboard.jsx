@@ -424,7 +424,7 @@ function FolderCard({ name, onClick, onContextMenu, selected }) {
 }
 
 /* ── Media Card ──────────────────────────────────────────── */
-function MediaCard({ src, filename, isVideo, selected, onLightbox, onContextMenu }) {
+function MediaCard({ src, filename, isVideo, selected, onLightbox, onContextMenu, starred, onToggleStar }) {
   const longPressTimer = useRef(null);
   const didLongPress   = useRef(false);
 
@@ -472,6 +472,20 @@ function MediaCard({ src, filename, isVideo, selected, onLightbox, onContextMenu
             <path d="M5 8l2 2 4-4" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
         </div>
+      )}
+
+      {/* Star toggle — top-right corner, opposite the selection dot */}
+      {onToggleStar && (
+        <button
+          style={gs.starToggle}
+          onClick={(e) => { e.stopPropagation(); onToggleStar(); }}
+          title={starred ? "Remove from Starred" : "Add to Starred"}
+        >
+          <svg viewBox="0 0 20 20" width="15" height="15" fill={starred ? "#f5cb5c" : "none"}>
+            <path d="M10 2.5l2.35 4.76 5.25.76-3.8 3.7.9 5.23L10 14.5l-4.7 2.45.9-5.23-3.8-3.7 5.25-.76z"
+              stroke={starred ? "#f5cb5c" : "#fff"} strokeWidth="1.3" strokeLinejoin="round" />
+          </svg>
+        </button>
       )}
     </div>
   );
@@ -1469,6 +1483,440 @@ const fsm = {
   },
 };
 
+/* ── Starred Grid View ──────────────────────────────────── */
+function StarredGridView({ photos, loading, starredSet, onToggleStar, onOpenLightbox, onAddToAlbum }) {
+  const [ctxMenu, setCtxMenu] = useState(null);
+
+  function relPathOf(url) {
+    return decodeURIComponent(url.replace(/^\/media\//, ""));
+  }
+
+  return (
+    <div>
+      <div style={sv.header}>
+        <h2 style={sv.title}>★ Starred</h2>
+        <span style={sv.count}>{photos.length} photo{photos.length !== 1 ? "s" : ""}</span>
+      </div>
+
+      {loading && (
+        <div style={gs.loadingState}>
+          <div className="loading-spinner" />
+          <span style={{ color: "var(--text-3)", fontSize: "0.9rem" }}>Loading…</span>
+        </div>
+      )}
+
+      {!loading && photos.length === 0 && (
+        <div style={gs.emptyState}>
+          <div style={{ fontSize: "2.5rem" }}>★</div>
+          <p style={{ color: "var(--text-3)", fontSize: "0.9rem" }}>
+            No starred photos yet — tap the star on any photo to add it here.
+          </p>
+        </div>
+      )}
+
+      <main style={gs.grid}>
+        {photos.map((url, i) => {
+          const relPath  = relPathOf(url);
+          const filename = relPath.split("/").pop();
+          const isVideo  = /\.(mp4|webm|mkv)$/i.test(url);
+          return (
+            <div key={url} style={{ position: "relative" }}>
+              <MediaCard
+                src={url} filename={filename} isVideo={isVideo}
+                selected={false}
+                starred={starredSet.has(relPath)}
+                onToggleStar={() => onToggleStar(relPath)}
+                onLightbox={() => onOpenLightbox(i)}
+                onContextMenu={(x, y) => setCtxMenu({ x, y, relPath })}
+              />
+            </div>
+          );
+        })}
+      </main>
+
+      {ctxMenu && (
+        <ContextMenu
+          x={ctxMenu.x} y={ctxMenu.y}
+          onClose={() => setCtxMenu(null)}
+          items={[
+            {
+              label: "Add to Album",
+              icon: (
+                <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                  <path d="M3 6a1 1 0 011-1h4l1.5 2H16a1 1 0 011 1v7a1 1 0 01-1 1H4a1 1 0 01-1-1V6z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                </svg>
+              ),
+              action: () => onAddToAlbum(ctxMenu.relPath),
+            },
+            {
+              label: "Remove from Starred",
+              icon: (
+                <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                  <path d="M10 2.5l2.35 4.76 5.25.76-3.8 3.7.9 5.23L10 14.5l-4.7 2.45.9-5.23-3.8-3.7 5.25-.76z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                </svg>
+              ),
+              action: () => onToggleStar(ctxMenu.relPath),
+              danger: true,
+            },
+          ]}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ── Albums List View ──────────────────────────────────── */
+function AlbumsGridView({ albums, loading, onOpen, onCreated, onDeleted }) {
+  const [showCreate, setShowCreate] = useState(false);
+  const [newName, setNewName]       = useState("");
+  const [creating, setCreating]     = useState(false);
+  const [error, setError]           = useState("");
+
+  async function createAlbum() {
+    const name = newName.trim();
+    if (!name) return;
+    setCreating(true); setError("");
+    try {
+      const res = await fetch("/api/albums", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok) {
+        setShowCreate(false); setNewName("");
+        onCreated();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        setError(d.error || "Failed to create album");
+      }
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function deleteAlbum(id, e) {
+    e.stopPropagation();
+    if (!confirm("Delete this album? The photos inside it are not deleted — only the grouping.")) return;
+    await fetch(`/api/albums/${id}`, { method: "DELETE" });
+    onDeleted();
+  }
+
+  return (
+    <div>
+      <div style={sv.header}>
+        <h2 style={sv.title}>Albums</h2>
+        <button className="glass-btn-accent" onClick={() => setShowCreate(true)}>+ New Album</button>
+      </div>
+
+      {loading && (
+        <div style={gs.loadingState}>
+          <div className="loading-spinner" />
+          <span style={{ color: "var(--text-3)", fontSize: "0.9rem" }}>Loading…</span>
+        </div>
+      )}
+
+      {!loading && albums.length === 0 && (
+        <div style={gs.emptyState}>
+          <div style={{ fontSize: "2.5rem" }}>🗂</div>
+          <p style={{ color: "var(--text-3)", fontSize: "0.9rem" }}>
+            No albums yet — group photos from anywhere in your library without moving the files.
+          </p>
+        </div>
+      )}
+
+      <main style={gs.grid}>
+        {albums.map((a) => (
+          <div key={a.id} style={av.tile} onClick={() => onOpen(a.id)}>
+            <div style={av.cover}>
+              {a.cover ? (
+                <img src={a.cover} loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
+              ) : (
+                <svg viewBox="0 0 48 40" fill="none" width="40" height="34">
+                  <path
+                    d="M2 8a4 4 0 014-4h12l4 4h20a4 4 0 014 4v22a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"
+                    fill="var(--folder-fill)" stroke="var(--folder-stroke)" strokeWidth="1.4"
+                  />
+                </svg>
+              )}
+            </div>
+            <div style={av.meta}>
+              <span style={av.name}>{a.name}</span>
+              <span style={av.count}>{a.count} photo{a.count !== 1 ? "s" : ""}</span>
+            </div>
+            <button style={av.deleteBtn} onClick={(e) => deleteAlbum(a.id, e)} title="Delete album">✕</button>
+          </div>
+        ))}
+      </main>
+
+      {showCreate && (
+        <div className="modal-overlay" onClick={() => setShowCreate(false)}>
+          <div className="glass-modal" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>New Album</h2>
+              <button className="modal-close" onClick={() => setShowCreate(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              {error && <div className="error-pill">{error}</div>}
+              <input
+                className="glass-input" placeholder="Album name" value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && createAlbum()}
+                autoFocus
+              />
+              <button className="glass-btn-primary" onClick={createAlbum} disabled={creating || !newName.trim()}>
+                {creating ? "Creating…" : "Create"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Single Album View ─────────────────────────────────── */
+function AlbumDetailGridView({ album, loading, starredSet, onToggleStar, onOpenLightbox, onRemovePhoto, onBack }) {
+  const [ctxMenu, setCtxMenu] = useState(null);
+
+  function relPathOf(url) {
+    return decodeURIComponent(url.replace(/^\/media\//, ""));
+  }
+
+  if (loading || !album) {
+    return (
+      <div style={gs.loadingState}>
+        <div className="loading-spinner" />
+        <span style={{ color: "var(--text-3)", fontSize: "0.9rem" }}>Loading…</span>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="back-bar" style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 0" }}>
+        <button style={gs.backBtn} className="back-btn" onClick={onBack}>
+          <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+            <path d="M13 5l-5 5 5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          Albums
+        </button>
+      </div>
+
+      <div style={sv.header}>
+        <h2 style={sv.title}>{album.name}</h2>
+        <span style={sv.count}>{album.photos.length} photo{album.photos.length !== 1 ? "s" : ""}</span>
+      </div>
+
+      {album.photos.length === 0 && (
+        <div style={gs.emptyState}>
+          <div style={{ fontSize: "2.5rem" }}>🗂</div>
+          <p style={{ color: "var(--text-3)", fontSize: "0.9rem" }}>
+            Empty — right-click any photo anywhere in your library and choose "Add to Album."
+          </p>
+        </div>
+      )}
+
+      <main style={gs.grid}>
+        {album.photos.map((url, i) => {
+          const relPath  = relPathOf(url);
+          const filename = relPath.split("/").pop();
+          const isVideo  = /\.(mp4|webm|mkv)$/i.test(url);
+          return (
+            <div key={url} style={{ position: "relative" }}>
+              <MediaCard
+                src={url} filename={filename} isVideo={isVideo}
+                selected={false}
+                starred={starredSet.has(relPath)}
+                onToggleStar={() => onToggleStar(relPath)}
+                onLightbox={() => onOpenLightbox(i)}
+                onContextMenu={(x, y) => setCtxMenu({ x, y, relPath })}
+              />
+            </div>
+          );
+        })}
+      </main>
+
+      {ctxMenu && (
+        <ContextMenu
+          x={ctxMenu.x} y={ctxMenu.y}
+          onClose={() => setCtxMenu(null)}
+          items={[
+            {
+              label: "Remove from Album",
+              icon: (
+                <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                  <path d="M5 10h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                </svg>
+              ),
+              action: () => onRemovePhoto(ctxMenu.relPath),
+              danger: true,
+            },
+          ]}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ── Add-to-Album Picker ───────────────────────────────── */
+function AlbumPickerModal({ paths, onClose }) {
+  const [albums, setAlbums]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [addedTo, setAddedTo] = useState(new Set());
+  const [newName, setNewName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError]     = useState("");
+
+  useEffect(() => {
+    fetch("/api/albums")
+      .then((r) => r.json())
+      .then((d) => { setAlbums(d.albums || []); setLoading(false); });
+  }, []);
+
+  async function addTo(albumId) {
+    setError("");
+    try {
+      const res = await fetch(`/api/albums/${albumId}/photos/add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paths }),
+      });
+      if (res.ok) {
+        setAddedTo((prev) => new Set(prev).add(albumId));
+      } else {
+        const d = await res.json().catch(() => ({}));
+        setError(d.error || "Failed to add");
+      }
+    } catch {
+      setError("Network error");
+    }
+  }
+
+  async function createAndAdd() {
+    const name = newName.trim();
+    if (!name) return;
+    setCreating(true); setError("");
+    try {
+      const res = await fetch("/api/albums", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok) {
+        const album = await res.json();
+        setAlbums((prev) => [album, ...prev]);
+        setNewName("");
+        await addTo(album.id);
+      } else {
+        const d = await res.json().catch(() => ({}));
+        setError(d.error || "Failed to create album");
+      }
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="glass-modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Add {paths.length > 1 ? `${paths.length} Photos` : "Photo"} to Album</h2>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          {error && <div className="error-pill">{error}</div>}
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              className="glass-input" placeholder="New album name" value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && createAndAdd()}
+            />
+            <button className="glass-btn-accent" onClick={createAndAdd} disabled={creating || !newName.trim()}>
+              {creating ? "…" : "Create"}
+            </button>
+          </div>
+
+          {loading && (
+            <div style={{ display: "flex", justifyContent: "center", padding: 20 }}>
+              <div className="loading-spinner" />
+            </div>
+          )}
+
+          {!loading && albums.length === 0 && (
+            <p style={{ fontSize: "0.84rem", color: "var(--text-3)", textAlign: "center", padding: "12px 0" }}>
+              No albums yet — create one above.
+            </p>
+          )}
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 260, overflowY: "auto" }}>
+            {albums.map((a) => {
+              const added = addedTo.has(a.id);
+              return (
+                <button
+                  key={a.id}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "10px 12px",
+                    background: added ? "var(--accent-bg)" : "var(--glass-bg)",
+                    border: "1px solid var(--glass-border)",
+                    cursor: added ? "default" : "pointer",
+                    fontFamily: "inherit", textAlign: "left",
+                  }}
+                  onClick={() => !added && addTo(a.id)}
+                  disabled={added}
+                >
+                  <span style={{ flex: 1, fontSize: "0.86rem", fontWeight: 600, color: added ? "var(--accent)" : "var(--text-1)" }}>
+                    {a.name}
+                  </span>
+                  <span style={{ fontSize: "0.74rem", color: "var(--text-3)" }}>{a.count} photo{a.count !== 1 ? "s" : ""}</span>
+                  {added && <CheckMark />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const sv = {
+  header: {
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    padding: "10px 2px 14px", flexWrap: "wrap", gap: 10,
+  },
+  title: { fontSize: "1.1rem", fontWeight: 700, color: "var(--text-1)", margin: 0 },
+  count: { fontSize: "0.82rem", color: "var(--text-3)" },
+};
+
+const av = {
+  tile: {
+    position: "relative",
+    display: "flex", flexDirection: "column",
+    background: "var(--glass-bg)", border: "1px solid var(--glass-border)",
+    cursor: "pointer", overflow: "hidden",
+  },
+  cover: {
+    aspectRatio: "1", width: "100%",
+    background: "rgba(128,128,128,0.08)",
+    display: "flex", alignItems: "center", justifyContent: "center",
+  },
+  meta: { padding: "8px 10px", display: "flex", flexDirection: "column", gap: 2 },
+  name: {
+    fontSize: "0.86rem", fontWeight: 600, color: "var(--text-1)",
+    overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis",
+  },
+  count: { fontSize: "0.72rem", color: "var(--text-3)" },
+  deleteBtn: {
+    position: "absolute", top: 6, right: 6,
+    width: 22, height: 22,
+    background: "rgba(0,0,0,0.5)", color: "#fff",
+    border: "none", cursor: "pointer", fontSize: "0.7rem",
+    display: "flex", alignItems: "center", justifyContent: "center",
+  },
+};
+
 function RandomPhotosWidget({
   photos, count, available, onCountChange, onRefresh, loading, onPhotoClick,
   folderTree, selectedFolders, onFoldersChange,
@@ -1714,6 +2162,17 @@ const rw = {
 /* ── Main GalleryDashboard ───────────────────────────────── */
 export default function GalleryDashboard() {
   const [currentPath, setCurrentPath] = useState("");
+  const [view, setView] = useState("folder"); // "folder" | "starred" | "albums" | "album"
+  const [currentAlbumId, setCurrentAlbumId] = useState(null);
+  const [starredSet, setStarredSet]   = useState(new Set()); // rel paths, without leading /media/
+  const [starredPhotos, setStarredPhotos] = useState([]);    // full /media/ urls for the Starred view
+  const [starredLoading, setStarredLoading] = useState(false);
+  const [albums, setAlbums]           = useState([]);
+  const [albumsLoading, setAlbumsLoading] = useState(false);
+  const [albumDetail, setAlbumDetail] = useState(null); // { id, name, photos }
+  const [albumDetailLoading, setAlbumDetailLoading] = useState(false);
+  const [albumPickerTarget, setAlbumPickerTarget] = useState(null); // rel path(s) being added to an album
+  const [uploadNotice, setUploadNotice] = useState(null); // duplicate-upload banner text
   const [files, setFiles]             = useState([]);
   const [folders, setFolders]         = useState([]);
   const [folderTree, setFolderTree]   = useState([]);
@@ -1739,6 +2198,8 @@ export default function GalleryDashboard() {
   const [randomCount, setRandomCount]         = useState(20);
   const [randomLoading, setRandomLoading]     = useState(false);
   const [randomLightbox, setRandomLightbox]   = useState(null); // index into randomPhotos
+  const [starredLightbox, setStarredLightbox] = useState(null); // index into starredPhotos
+  const [albumLightbox, setAlbumLightbox]     = useState(null); // index into albumDetail.photos
   const [randomFolders, setRandomFolders]     = useState(["__all__"]); // selected folder paths; "__all__" = everything
   const [showFolderPicker, setShowFolderPicker] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -1755,6 +2216,81 @@ const { user, isAdmin } = useAuth();
       .then((r) => r.json())
       .then((d) => setFolderTree(d.tree || []));
   }, []);
+
+  /* ── Load starred set once so star icons are correct everywhere,
+         not just while viewing the Starred page ────────────── */
+  const loadStarred = useCallback(async () => {
+    if (isAdmin) return;
+    setStarredLoading(true);
+    try {
+      const res = await fetch("/api/favorites");
+      if (res.ok) {
+        const d = await res.json();
+        const photos = d.photos || [];
+        setStarredPhotos(photos);
+        setStarredSet(new Set(photos.map((u) => decodeURIComponent(u.replace(/^\/media\//, "")))));
+      }
+    } finally {
+      setStarredLoading(false);
+    }
+  }, [isAdmin]);
+
+  useEffect(() => { loadStarred(); }, [isAdmin]);
+
+  async function toggleStar(relPath) {
+    try {
+      const res = await fetch("/api/favorites/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: relPath }),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setStarredSet((prev) => {
+          const next = new Set(prev);
+          if (d.starred) next.add(relPath); else next.delete(relPath);
+          return next;
+        });
+        // Keep the Starred view itself in sync if it's the one currently open
+        if (view === "starred") loadStarred();
+      }
+    } catch (e) { console.error(e); }
+  }
+
+  /* ── Albums ─────────────────────────────────────────────── */
+  const loadAlbums = useCallback(async () => {
+    setAlbumsLoading(true);
+    try {
+      const res = await fetch("/api/albums");
+      if (res.ok) setAlbums((await res.json()).albums || []);
+    } finally {
+      setAlbumsLoading(false);
+    }
+  }, []);
+
+  async function loadAlbumDetail(id) {
+    setAlbumDetailLoading(true);
+    try {
+      const res = await fetch(`/api/albums/${id}`);
+      if (res.ok) setAlbumDetail(await res.json());
+    } finally {
+      setAlbumDetailLoading(false);
+    }
+  }
+
+  function openStarredView() {
+    setView("starred");
+    loadStarred();
+  }
+  function openAlbumsView() {
+    setView("albums");
+    loadAlbums();
+  }
+  function openAlbum(id) {
+    setView("album");
+    setCurrentAlbumId(id);
+    loadAlbumDetail(id);
+  }
 
   useEffect(() => {
     setZoom(1);
@@ -1803,7 +2339,7 @@ const { user, isAdmin } = useAuth();
 
   useEffect(() => { loadMedia(currentPath); }, [currentPath]);
 
-  function navigate(path) { setCurrentPath(path); }
+  function navigate(path) { setView("folder"); setCurrentPath(path); }
 
   function goUp() {
     const parts = currentPath.split("/");
@@ -1883,11 +2419,24 @@ const { user, isAdmin } = useAuth();
   async function handleUpload(e) {
     const uploadFiles = Array.from(e.target.files || []);
     if (!uploadFiles.length) return;
+    const dupNotes = [];
     for (const file of uploadFiles) {
       const fd = new FormData();
       fd.append("path", currentPath);
       fd.append("file", file);
-      await fetch("/api/upload", { method: "POST", body: fd });
+      try {
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
+        if (res.ok) {
+          const d = await res.json();
+          if (d.duplicate_of?.length) {
+            dupNotes.push(`"${file.name}" looks like a duplicate of ${d.duplicate_of.length} existing photo${d.duplicate_of.length !== 1 ? "s" : ""}`);
+          }
+        }
+      } catch (err) { console.error(err); }
+    }
+    if (dupNotes.length) {
+      setUploadNotice(dupNotes.join(" · "));
+      setTimeout(() => setUploadNotice(null), 8000);
     }
     loadMedia(currentPath);
   }
@@ -1900,7 +2449,8 @@ const { user, isAdmin } = useAuth();
   /* ── Context menu builders ─────────────────────────────── */
   function openFileContextMenu(x, y, filename, fileIdx) {
     const isSelected = selected.has(filename);
-    const fileUrl = `/media/${currentPath ? currentPath + "/" : ""}${filename}`;
+    const relPath = currentPath ? `${currentPath}/${filename}` : filename;
+    const isStarred = starredSet.has(relPath);
 
     setCtxMenu({
       x, y,
@@ -1949,6 +2499,26 @@ const { user, isAdmin } = useAuth();
           icon:  <MoveIcon />,
           action: () => setMoveTarget({ items: [{ srcDir: currentPath, srcName: filename }] }),
         },
+        ...(!isAdmin ? [
+          {
+            label: isStarred ? "Remove from Starred" : "Add to Starred",
+            icon: (
+              <svg viewBox="0 0 20 20" fill={isStarred ? "#f5cb5c" : "none"} width="14" height="14">
+                <path d="M10 2.5l2.35 4.76 5.25.76-3.8 3.7.9 5.23L10 14.5l-4.7 2.45.9-5.23-3.8-3.7 5.25-.76z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+              </svg>
+            ),
+            action: () => toggleStar(relPath),
+          },
+          {
+            label: "Add to Album",
+            icon: (
+              <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                <path d="M3 6a1 1 0 011-1h4l1.5 2H16a1 1 0 011 1v7a1 1 0 01-1 1H4a1 1 0 01-1-1V6z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+              </svg>
+            ),
+            action: () => setAlbumPickerTarget([relPath]),
+          },
+        ] : []),
         "divider",
         {
           label: "Delete",
@@ -2184,6 +2754,9 @@ function handleTouchEnd() {
           onCreateFolder={() => setShowCreateFolder(true)}
           onManageUsers={() => setShowUserManager(true)}
           onActivityLog={() => setShowActivityLog(true)}
+          activeView={view}
+          onNavigateStarred={openStarredView}
+          onNavigateAlbums={openAlbumsView}
         />
       </div>
 
@@ -2200,6 +2773,9 @@ function handleTouchEnd() {
           onManageUsers={() => setShowUserManager(true)}
           onActivityLog={() => setShowActivityLog(true)}
           onBgContextMenu={(x, y) => setBgCtxMenu({ x, y })}  
+          activeView={view}
+          onNavigateStarred={openStarredView}
+          onNavigateAlbums={openAlbumsView}
         />
         </div>
       )}
@@ -2233,6 +2809,19 @@ function handleTouchEnd() {
           onChange={handleUpload}
         />
 
+        {/* Duplicate-upload notice */}
+        {uploadNotice && (
+          <div style={gs.uploadNotice}>
+            <svg viewBox="0 0 20 20" fill="none" width="15" height="15" style={{ flexShrink: 0 }}>
+              <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.4" />
+              <path d="M10 6.5v4M10 13.2v.1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+            <span>{uploadNotice}</span>
+            <button style={gs.uploadNoticeClose} onClick={() => setUploadNotice(null)}>✕</button>
+          </div>
+        )}
+
+        {view === "folder" && (<>
         {/* ── Selection action bar ──────────────────────── */}
         {totalSelected > 0 && (
           <div style={gs.selectionBar}>
@@ -2368,12 +2957,15 @@ function handleTouchEnd() {
               `/media/${currentPath ? currentPath + "/" : ""}${file}`
             );
             const isVideo = /\.(mp4|webm|mkv)$/i.test(file);
-            const src     = `/media/${currentPath ? currentPath + "/" : ""}${file}`;
+            const relPath  = currentPath ? `${currentPath}/${file}` : file;
+            const src     = `/media/${relPath}`;
             return (
               <div key={file} style={{ position: "relative" }} className="media-card-wrap">
                 <MediaCard
                   src={src} filename={file} isVideo={isVideo}
                   selected={selected.has(file)}
+                  starred={starredSet.has(relPath)}
+                  onToggleStar={isAdmin ? null : () => toggleStar(relPath)}
                   onLightbox={() => {
                     if (totalSelected > 0) { toggleSelectFile(file); return; }
                     setLightboxIndex(globalIdx);   // ← correct full-list index
@@ -2393,6 +2985,51 @@ function handleTouchEnd() {
             <PaginationBar page={page} totalPages={totalPages} setPage={setPage} />
           </div>
         )}
+        </>)}
+
+        {/* ── Starred view ─────────────────────────────────── */}
+        {view === "starred" && (
+          <StarredGridView
+            photos={starredPhotos}
+            loading={starredLoading}
+            starredSet={starredSet}
+            onToggleStar={toggleStar}
+            onOpenLightbox={(i) => setStarredLightbox(i)}
+            onAddToAlbum={(relPath) => setAlbumPickerTarget([relPath])}
+          />
+        )}
+
+        {/* ── Albums list view ─────────────────────────────── */}
+        {view === "albums" && (
+          <AlbumsGridView
+            albums={albums}
+            loading={albumsLoading}
+            onOpen={openAlbum}
+            onCreated={loadAlbums}
+            onDeleted={loadAlbums}
+          />
+        )}
+
+        {/* ── Single album view ────────────────────────────── */}
+        {view === "album" && (
+          <AlbumDetailGridView
+            album={albumDetail}
+            loading={albumDetailLoading}
+            starredSet={starredSet}
+            onToggleStar={toggleStar}
+            onOpenLightbox={(i) => setAlbumLightbox(i)}
+            onRemovePhoto={async (relPath) => {
+              await fetch(`/api/albums/${currentAlbumId}/photos/remove`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ paths: [relPath] }),
+              });
+              loadAlbumDetail(currentAlbumId);
+            }}
+            onBack={openAlbumsView}
+          />
+        )}
+
 
       {/* ── Mobile bottom Sidebar nav ───────────────────── */}
       <div className="bottom-nav-mobile" style={{ display: "none" }}>
@@ -2405,6 +3042,9 @@ function handleTouchEnd() {
           onCreateFolder={() => setShowCreateFolder(true)}
           onManageUsers={() => setShowUserManager(true)}
           onActivityLog={() => setShowActivityLog(true)}
+          activeView={view}
+          onNavigateStarred={openStarredView}
+          onNavigateAlbums={openAlbumsView}
         />
       </div>
 
@@ -2442,6 +3082,50 @@ function handleTouchEnd() {
             setRandomLightbox(null);
             loadRandomPhotos(randomCount, randomFolders);
           }}
+        />
+      )}
+
+      {/* ── Starred lightbox ──────────────────────────── */}
+      {starredLightbox !== null && (
+        <Lightbox
+          files={starredPhotos}
+          index={starredLightbox}
+          onClose={() => setStarredLightbox(null)}
+          onPrev={() => setStarredLightbox((i) => (i - 1 + starredPhotos.length) % starredPhotos.length)}
+          onNext={() => setStarredLightbox((i) => (i + 1) % starredPhotos.length)}
+          slideshowInterval={slideshowInterval}
+          setSlideshowInterval={setSlideshowInterval}
+          folderTree={folderTree}
+          onFileRemoved={() => {
+            setStarredLightbox(null);
+            loadStarred();
+          }}
+        />
+      )}
+
+      {/* ── Album lightbox ────────────────────────────── */}
+      {albumLightbox !== null && albumDetail && (
+        <Lightbox
+          files={albumDetail.photos}
+          index={albumLightbox}
+          onClose={() => setAlbumLightbox(null)}
+          onPrev={() => setAlbumLightbox((i) => (i - 1 + albumDetail.photos.length) % albumDetail.photos.length)}
+          onNext={() => setAlbumLightbox((i) => (i + 1) % albumDetail.photos.length)}
+          slideshowInterval={slideshowInterval}
+          setSlideshowInterval={setSlideshowInterval}
+          folderTree={folderTree}
+          onFileRemoved={() => {
+            setAlbumLightbox(null);
+            loadAlbumDetail(currentAlbumId);
+          }}
+        />
+      )}
+
+      {/* ── Add to Album picker ───────────────────────── */}
+      {albumPickerTarget && (
+        <AlbumPickerModal
+          paths={albumPickerTarget}
+          onClose={() => setAlbumPickerTarget(null)}
         />
       )}
 
@@ -2656,6 +3340,18 @@ const gs = {
     display: "flex", alignItems: "center", justifyContent: "center",
     gap: 12, padding: 64, color: "var(--text-3)",
   },
+  uploadNotice: {
+    display: "flex", alignItems: "center", gap: 8,
+    background: "var(--bg-mid)", border: "1px solid var(--accent-border)",
+    color: "var(--text-1)", padding: "10px 14px",
+    fontSize: "0.82rem", fontWeight: 500,
+    margin: "0 0 10px",
+  },
+  uploadNoticeClose: {
+    marginLeft: "auto", background: "transparent", border: "none",
+    color: "var(--text-3)", cursor: "pointer", fontSize: "0.8rem",
+    padding: "2px 4px", flexShrink: 0,
+  },
   emptyState: {
     gridColumn: "1 / -1",
     display: "flex", flexDirection: "column", alignItems: "center",
@@ -2718,6 +3414,14 @@ const gs = {
     position: "absolute", top: 6, left: 6,
     filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.5))",
   },
+  starToggle: {
+    position: "absolute", top: 6, right: 6,
+    width: 26, height: 26,
+    background: "rgba(0,0,0,0.45)",
+    border: "none", cursor: "pointer",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.5))",
+  },
   pagination: {
     display: "flex", alignItems: "center", justifyContent: "center",
     gap: 6, padding: "16px 0",
@@ -2744,4 +3448,4 @@ const gs = {
     whiteSpace: "nowrap",
   },
   
-};
+}; 

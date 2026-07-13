@@ -1,3 +1,7 @@
+// components/Sidebar.jsx
+// Desktop: floating glass sidebar with rounded edges (Apple-style)
+// Mobile: collapsible bottom sheet triggered by a floating nav bar
+
 import { useState, useEffect, useRef } from "react";
 import { useTheme } from "../context/ThemeContext";
 
@@ -14,6 +18,20 @@ const HomeIcon = () => (
   <svg viewBox="0 0 20 20" fill="none" width="15" height="15">
     <path d="M3 9.5L10 3l7 6.5V17a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z" stroke="currentColor" strokeWidth="1.4" />
     <path d="M7 18v-6h6v6" stroke="currentColor" strokeWidth="1.4" />
+  </svg>
+);
+
+const StarNavIcon = () => (
+  <svg viewBox="0 0 20 20" fill="none" width="15" height="15">
+    <path d="M10 2.5l2.35 4.76 5.25.76-3.8 3.7.9 5.23L10 14.5l-4.7 2.45.9-5.23-3.8-3.7 5.25-.76z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+  </svg>
+);
+
+const AlbumNavIcon = () => (
+  <svg viewBox="0 0 20 20" fill="none" width="15" height="15">
+    <rect x="3" y="3" width="14" height="14" rx="0" stroke="currentColor" strokeWidth="1.4" />
+    <path d="M3 13l4-4 3 3 2-2 5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    <circle cx="7" cy="7" r="1.1" fill="currentColor" />
   </svg>
 );
 
@@ -336,6 +354,9 @@ function SidebarContent({
   onManageUsers,
   onActivityLog,
   onChangePassword,
+  activeView,
+  onNavigateStarred,
+  onNavigateAlbums,
 }) {
   const { toggleTheme } = useTheme();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -370,9 +391,9 @@ function SidebarContent({
           style={{
             ...nodeStyles.btn,
             paddingLeft: 12,
-            background: currentPath === "" ? "var(--accent-bg)" : "transparent",
-            color: currentPath === "" ? "var(--accent)" : "var(--text-2)",
-            borderLeft: currentPath === "" ? "2px solid var(--accent)" : "2px solid transparent",
+            background: currentPath === "" && activeView === "folder" ? "var(--accent-bg)" : "transparent",
+            color: currentPath === "" && activeView === "folder" ? "var(--accent)" : "var(--text-2)",
+            borderLeft: currentPath === "" && activeView === "folder" ? "2px solid var(--accent)" : "2px solid transparent",
           }}
           onClick={() => { onNavigate(""); onClose(); }}
         >
@@ -380,12 +401,43 @@ function SidebarContent({
           <span>All Media</span>
         </button>
 
+        {!isAdmin && (
+          <>
+            <button
+              style={{
+                ...nodeStyles.btn,
+                paddingLeft: 12,
+                background: activeView === "starred" ? "var(--accent-bg)" : "transparent",
+                color: activeView === "starred" ? "var(--accent)" : "var(--text-2)",
+                borderLeft: activeView === "starred" ? "2px solid var(--accent)" : "2px solid transparent",
+              }}
+              onClick={() => { onNavigateStarred?.(); onClose(); }}
+            >
+              <StarNavIcon />
+              <span>Starred</span>
+            </button>
+            <button
+              style={{
+                ...nodeStyles.btn,
+                paddingLeft: 12,
+                background: activeView === "albums" || activeView === "album" ? "var(--accent-bg)" : "transparent",
+                color: activeView === "albums" || activeView === "album" ? "var(--accent)" : "var(--text-2)",
+                borderLeft: activeView === "albums" || activeView === "album" ? "2px solid var(--accent)" : "2px solid transparent",
+              }}
+              onClick={() => { onNavigateAlbums?.(); onClose(); }}
+            >
+              <AlbumNavIcon />
+              <span>Albums</span>
+            </button>
+          </>
+        )}
+
         {/* Folder tree */}
         {folderTree.map((node) => (
           <TreeNode
             key={node.path}
             node={node}
-            currentPath={currentPath}
+            currentPath={activeView === "folder" ? currentPath : "\u0000"}
             onNavigate={(p) => { onNavigate(p); onClose(); }}
           />
         ))}
@@ -494,7 +546,8 @@ export default function Sidebar({
   user, isAdmin, folderTree, currentPath,
   onNavigate, isOpen, onClose,
   onUpload, onCreateFolder, onManageUsers, onActivityLog,
-  onBgContextMenu,   
+  onBgContextMenu,
+  activeView, onNavigateStarred, onNavigateAlbums,
 }){
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
@@ -573,6 +626,9 @@ export default function Sidebar({
           onCreateFolder={onCreateFolder} onManageUsers={onManageUsers}
           onActivityLog={onActivityLog}
           onChangePassword={() => setShowChangePassword(true)}
+          activeView={activeView}
+          onNavigateStarred={onNavigateStarred}
+          onNavigateAlbums={onNavigateAlbums}
         />
       </aside>
 
@@ -600,6 +656,9 @@ export default function Sidebar({
               onManageUsers={onManageUsers}
               onActivityLog={onActivityLog}
               onChangePassword={() => setShowChangePassword(true)}
+              activeView={activeView}
+              onNavigateStarred={onNavigateStarred}
+              onNavigateAlbums={onNavigateAlbums}
             />
           </aside>
         </>

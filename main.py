@@ -5,9 +5,13 @@ import shutil
 import contextlib
 import random
 import threading
+import aiofiles
+import hashlib
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Form, File, UploadFile, HTTPException
+from pydantic import BaseModel
 from fastapi.params import Query
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,6 +24,7 @@ from datetime import datetime
 
 from workerFiles.file_renamer_scheduler import start_scheduler, stop_scheduler, get_scheduler_status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -250,22 +255,219 @@ def load_activity() -> list:
         })
     return result
 
+# ── Albums ────────────────────────────────────────────────────────────────────
+# Cross-folder photo groupings — an album just holds a list of media-relative
+# paths, the underlying files never move. Private per-owner (admin can see/
+# manage all of them for moderation purposes).
+
+ALBUMS_FILE = os.path.join(BASE_DIR, "albums.json")
+_albums_cache: dict | None = None
+_albums_lock  = threading.Lock()
+
+
+def load_albums() -> dict:
+    global _albums_cache
+    if _albums_cache is not None:
+        return _albums_cache
+    with _albums_lock:
+        if _albums_cache is None:
+            _albums_cache = json.load(open(ALBUMS_FILE)) if os.path.exists(ALBUMS_FILE) else {}
+    return _albums_cache
+
+
+def save_albums(a: dict) -> None:
+    global _albums_cache
+    with _albums_lock:
+        tmp = ALBUMS_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(a, f, separators=(',', ':'))
+        os.replace(tmp, ALBUMS_FILE)
+        _albums_cache = a
+
+
+# ── Favorites ─────────────────────────────────────────────────────────────────
+# { "<username>": ["rel/path1", "rel/path2", ...] }
+
+FAVORITES_FILE = os.path.join(BASE_DIR, "favorites.json")
+_favorites_cache: dict | None = None
+_favorites_lock  = threading.Lock()
+
+
+def load_favorites() -> dict:
+    global _favorites_cache
+    if _favorites_cache is not None:
+        return _favorites_cache
+    with _favorites_lock:
+        if _favorites_cache is None:
+            _favorites_cache = json.load(open(FAVORITES_FILE)) if os.path.exists(FAVORITES_FILE) else {}
+    return _favorites_cache
+
+
+def save_favorites(fdict: dict) -> None:
+    global _favorites_cache
+    with _favorites_lock:
+        tmp = FAVORITES_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(fdict, f, separators=(',', ':'))
+        os.replace(tmp, FAVORITES_FILE)
+        _favorites_cache = fdict
+
+
+# ── File hashes (duplicate detection) ─────────────────────────────────────────
+# { "by_hash": { md5hex: [rel_paths...] }, "by_path": { rel_path: md5hex } }
+# Content hash is computed while streaming an upload to disk (no second read
+# pass needed). Purely informational — a detected duplicate never blocks an
+# upload, it's just surfaced back to the user.
+
+HASHES_FILE = os.path.join(BASE_DIR, "file_hashes.json")
+_hashes_cache: dict | None = None
+_hashes_lock  = threading.Lock()
+
+
+def load_hashes() -> dict:
+    global _hashes_cache
+    if _hashes_cache is not None:
+        return _hashes_cache
+    with _hashes_lock:
+        if _hashes_cache is None:
+            if os.path.exists(HASHES_FILE):
+                _hashes_cache = json.load(open(HASHES_FILE))
+            else:
+                _hashes_cache = {"by_hash": {}, "by_path": {}}
+    return _hashes_cache
+
+
+def save_hashes(h: dict) -> None:
+    global _hashes_cache
+    with _hashes_lock:
+        tmp = HASHES_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(h, f, separators=(',', ':'))
+        os.replace(tmp, HASHES_FILE)
+        _hashes_cache = h
+
+
+def _record_file_hash(rel_path: str, file_hash: str) -> list[str]:
+    """Store this file's hash; return any OTHER paths that already carried
+    the same hash (i.e. likely duplicates), captured before this file joins
+    the index itself so it never flags against its own entry."""
+    h = load_hashes()
+    existing = list(h["by_hash"].get(file_hash, []))
+    h["by_hash"].setdefault(file_hash, [])
+    if rel_path not in h["by_hash"][file_hash]:
+        h["by_hash"][file_hash].append(rel_path)
+    h["by_path"][rel_path] = file_hash
+    save_hashes(h)
+    return existing
+
+
+def _remove_file_hash(rel_path: str) -> None:
+    h = load_hashes()
+    file_hash = h["by_path"].pop(rel_path, None)
+    if file_hash and file_hash in h["by_hash"]:
+        h["by_hash"][file_hash] = [p for p in h["by_hash"][file_hash] if p != rel_path]
+        if not h["by_hash"][file_hash]:
+            del h["by_hash"][file_hash]
+    save_hashes(h)
+
+
+def _rename_file_hash(old_rel: str, new_rel: str) -> None:
+    """Used on move — same content, new path."""
+    h = load_hashes()
+    file_hash = h["by_path"].pop(old_rel, None)
+    if file_hash:
+        h["by_path"][new_rel] = file_hash
+        if file_hash in h["by_hash"]:
+            h["by_hash"][file_hash] = [new_rel if p == old_rel else p for p in h["by_hash"][file_hash]]
+    save_hashes(h)
+
+
+def _remove_path_everywhere(rel_path: str) -> None:
+    """rel_path may be a single file OR a folder prefix (from a folder
+    delete) — strip it out of every album and every user's favorites so
+    deleted photos don't linger as broken references."""
+    albums  = load_albums()
+    changed = False
+    for a in albums.values():
+        before = len(a.get("photos", []))
+        a["photos"] = [p for p in a.get("photos", []) if not (p == rel_path or p.startswith(rel_path + "/"))]
+        if len(a["photos"]) != before:
+            changed = True
+    if changed:
+        save_albums(albums)
+
+    favs_all = load_favorites()
+    changed  = False
+    for user, favs in favs_all.items():
+        before = len(favs)
+        favs_all[user] = [p for p in favs if not (p == rel_path or p.startswith(rel_path + "/"))]
+        if len(favs_all[user]) != before:
+            changed = True
+    if changed:
+        save_favorites(favs_all)
+
+
+def _rename_path_everywhere(old_rel: str, new_rel: str) -> None:
+    """Keeps album/favorite references pointing at the right place after a
+    move — works for both single-file and whole-folder moves via prefix
+    rewriting."""
+    albums  = load_albums()
+    changed = False
+    for a in albums.values():
+        new_list = []
+        for p in a.get("photos", []):
+            if p == old_rel:
+                new_list.append(new_rel); changed = True
+            elif p.startswith(old_rel + "/"):
+                new_list.append(new_rel + p[len(old_rel):]); changed = True
+            else:
+                new_list.append(p)
+        a["photos"] = new_list
+    if changed:
+        save_albums(albums)
+
+    favs_all = load_favorites()
+    changed  = False
+    for user, favs in favs_all.items():
+        new_list = []
+        for p in favs:
+            if p == old_rel:
+                new_list.append(new_rel); changed = True
+            elif p.startswith(old_rel + "/"):
+                new_list.append(new_rel + p[len(old_rel):]); changed = True
+            else:
+                new_list.append(p)
+        favs_all[user] = new_list
+    if changed:
+        save_favorites(favs_all)
+
+
 import json, threading
 
 _INDEX_PATH = os.path.join(os.path.dirname(__file__), "media_index.json")
 _index_lock = threading.Lock()
 
+_index_cache: dict | None = None
+
 def _load_media_index() -> dict:
-    """{ "username/folder/sub": ["username/folder/sub/fname_001.jpg", ...] }"""
+    """{ "username/folder/sub": ["username/folder/sub/fname_001.jpg", ...] }
+    Cached in memory after first read — callers must hold _index_lock while
+    calling this if they intend to mutate + save the result, same as before."""
+    global _index_cache
+    if _index_cache is not None:
+        return _index_cache
     try:
         with open(_INDEX_PATH, "r") as f:
-            return json.load(f)
+            _index_cache = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+        _index_cache = {}
+    return _index_cache
 
 def _save_index(idx: dict):
+    global _index_cache
     with open(_INDEX_PATH, "w") as f:
         json.dump(idx, f, indent=2)
+    _index_cache = idx
 
 def _next_counter(target_dir: str, folder_name: str) -> int:
     """Find next available counter by scanning existing files in that dir."""
@@ -298,6 +500,7 @@ def _remove_from_index(rel_path: str):
             if not idx[key]:
                 del idx[key]
         _save_index(idx)
+
 
 def _bootstrap_index():
     """Scan MEDIA_DIR and index any files not already in the index."""
@@ -351,10 +554,28 @@ class LargeUploadMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(LargeUploadMiddleware)
 
+class CachedStaticFiles(StaticFiles):
+    """Same as StaticFiles, but tells the browser it can cache the response
+    for a long time instead of revalidating on every single load. Safe here
+    because /assets filenames are content-hashed by the Vite build (a new
+    build = new filename = automatic cache-bust), and /backgrounds only
+    holds a handful of theme wallpapers that essentially never change."""
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return resp
+
 app.mount("/media",  StaticFiles(directory=MEDIA_DIR), name="media")
 # app.mount("/static", StaticFiles(directory="static"),  name="static")
 if os.path.isdir(os.path.join(DIST_DIR, "assets")):
-    app.mount("/assets", StaticFiles(directory=os.path.join(DIST_DIR, "assets")), name="assets")
+    app.mount("/assets", CachedStaticFiles(directory=os.path.join(DIST_DIR, "assets")), name="assets")
+if os.path.isdir(os.path.join(DIST_DIR, "backgrounds")):
+    app.mount("/backgrounds", CachedStaticFiles(directory=os.path.join(DIST_DIR, "backgrounds")), name="backgrounds")
+
+# Compresses JSON/HTML/text responses (admin stats, folder tree, activity
+# log, etc.) — cheap win for perceived speed, especially over a real network
+# rather than localhost.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
@@ -401,7 +622,17 @@ def day_restricted_response(username: str) -> JSONResponse | None:
 def can_access_path(username: str, path: str) -> bool:
     if username == "admin" or not path:
         return True
-    return path.split("/", 1)[0] in ("shared", username)
+    top = path.split("/", 1)[0]
+    if top in ("shared", username):
+        return True
+    # A bare filename (no "/", with a recognized media extension) sitting
+    # directly in the true root of MEDIA_DIR has no folder-based owner at
+    # all — any authenticated user may access it, same as "shared". This
+    # can never be used to reach into someone else's top-level FOLDER,
+    # since folder names never carry a media file extension.
+    if "/" not in path and path.lower().endswith(_ALLOWED_EXT):
+        return True
+    return False
 
 
 def visible_top_folders(username: str) -> frozenset | None:
@@ -857,14 +1088,16 @@ async def upload_media(request: Request,
         new_filename = f"{folder_name}_{counter:03d}{ext.lower()}"
         file_path    = os.path.join(target_dir, new_filename)
 
-    # ── Write file ────────────────────────────────────────────
+    # ── Write file (hashing as we go, for duplicate detection) ─
+    file_hash = hashlib.md5()
     try:
-        with open(file_path, "wb") as buf:
+        async with aiofiles.open(file_path, "wb") as buf:
             while True:
                 chunk = await file.read(_CHUNK)
                 if not chunk:
                     break
-                buf.write(chunk)
+                file_hash.update(chunk)
+                await buf.write(chunk)
     except Exception:
         with contextlib.suppress(OSError):
             os.remove(file_path)
@@ -874,7 +1107,15 @@ async def upload_media(request: Request,
     rel = os.path.relpath(file_path, MEDIA_DIR).replace(os.sep, "/")
     _add_to_index(rel)
 
-    return {"filename": new_filename, "status": "success"}
+    # ── Duplicate detection (informational only) ───────────────
+    dup_paths = _record_file_hash(rel, file_hash.hexdigest())
+    dup_paths = [p for p in dup_paths if can_access_path(user, p)]
+
+    return {
+        "filename": new_filename,
+        "status": "success",
+        "duplicate_of": [f"/media/{p}" for p in dup_paths],
+    }
 
 
 @app.delete("/api/media")
@@ -897,10 +1138,14 @@ def delete_media(request: Request, path: str = "", filename: str = ""):
         raise HTTPException(status_code=403, detail="Cannot delete the shared folder")
 
     try:
-        shutil.rmtree(target) if os.path.isdir(target) else os.remove(target)
+        was_dir = os.path.isdir(target)
+        shutil.rmtree(target) if was_dir else os.remove(target)
         # Remove from index
         rel = os.path.relpath(target, MEDIA_DIR).replace(os.sep, "/")
         _remove_from_index(rel)
+        _remove_path_everywhere(rel)   # drop from albums/favorites too
+        if not was_dir:
+            _remove_file_hash(rel)
     except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -908,14 +1153,25 @@ def delete_media(request: Request, path: str = "", filename: str = ""):
 
 # ── Move file/folder ──────────────────────────────────────────────────────────
 
+class MoveRequest(BaseModel):
+    src_path:  str = ""
+    filename:  str = ""
+    dest_path: str = ""
+
 @app.post("/api/move")
-async def move_media(request: Request):
+def move_media(body: MoveRequest, request: Request):
     """Move a file or folder to a different destination directory.
 
     Body (JSON):
         src_path  – current parent folder path   (e.g. "alice/trips")
         filename  – file or folder name          (e.g. "photo.jpg" or "beach")
         dest_path – target parent folder path    (e.g. "alice/archive")
+
+    Plain `def` (not `async def`) on purpose: FastAPI runs synchronous route
+    functions in a threadpool automatically, so the blocking shutil.move()
+    and index read/write below don't stall the single asyncio event loop —
+    previously this was `async def` doing blocking I/O directly on the loop,
+    which froze every other concurrent request for the duration of the move.
     """
     user = get_current_user(request)
     if not user:
@@ -925,13 +1181,9 @@ async def move_media(request: Request):
     if restricted:
         return restricted
 
-    try:
-        body      = await request.json()
-        src_path  = (body.get("src_path")  or "").strip("/")
-        filename  = (body.get("filename")  or "").strip()
-        dest_path = (body.get("dest_path") or "").strip("/")
-    except Exception:
-        return JSONResponse(status_code=400, content={"error": "Invalid JSON body"})
+    src_path  = body.src_path.strip("/")
+    filename  = body.filename.strip()
+    dest_path = body.dest_path.strip("/")
 
     if not filename:
         return JSONResponse(status_code=400, content={"error": "filename is required"})
@@ -960,16 +1212,184 @@ async def move_media(request: Request):
             content={"error": f"'{filename}' already exists in destination"})
 
     try:
+        was_dir = os.path.isdir(src_abs)
         shutil.move(src_abs, dest_file)
         # Update index: remove old path, add new path
         old_rel = os.path.relpath(src_abs,  MEDIA_DIR).replace(os.sep, "/")
         new_rel = os.path.relpath(dest_file, MEDIA_DIR).replace(os.sep, "/")
         _remove_from_index(old_rel)
         _add_to_index(new_rel)
+        _rename_path_everywhere(old_rel, new_rel)   # albums/favorites follow the move
+        if not was_dir:
+            _rename_file_hash(old_rel, new_rel)
     except OSError as exc:
         return JSONResponse(status_code=500, content={"error": str(exc)})
 
     return {"status": "moved", "filename": filename, "dest": dest_path}
+
+
+# ── Albums API ─────────────────────────────────────────────────────────────────
+# Cross-folder groupings — an album is just a named list of media-relative
+# paths. Adding/removing a photo never touches the underlying file.
+
+@app.get("/api/albums")
+def list_albums(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    albums = load_albums()
+    out = []
+    for aid, a in albums.items():
+        if a.get("owner") != user and user != "admin":
+            continue
+        photos = [p for p in a.get("photos", []) if can_access_path(user, p)]
+        out.append({
+            "id":      aid,
+            "name":    a.get("name", ""),
+            "count":   len(photos),
+            "cover":   f"/media/{photos[0]}" if photos else None,
+            "created": a.get("created"),
+        })
+    out.sort(key=lambda a: a["created"] or "", reverse=True)
+    return {"albums": out}
+
+
+class AlbumCreateRequest(BaseModel):
+    name: str = ""
+
+@app.post("/api/albums")
+def create_album(body: AlbumCreateRequest, request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    name = body.name.strip()
+    if not name:
+        return JSONResponse(status_code=400, content={"error": "Album name is required"})
+    if len(name) > 60:
+        return JSONResponse(status_code=400, content={"error": "Album name is too long"})
+    albums    = load_albums()
+    album_id  = uuid.uuid4().hex[:12]
+    created   = datetime.now().isoformat()
+    albums[album_id] = {"id": album_id, "name": name, "owner": user, "created": created, "photos": []}
+    save_albums(albums)
+    return {"id": album_id, "name": name, "count": 0, "cover": None, "created": created}
+
+
+@app.delete("/api/albums/{album_id}")
+def delete_album(album_id: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    albums = load_albums()
+    album  = albums.get(album_id)
+    if not album:
+        return JSONResponse(status_code=404, content={"error": "Album not found"})
+    if album.get("owner") != user and user != "admin":
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    del albums[album_id]
+    save_albums(albums)
+    return {"status": "deleted"}
+
+
+@app.get("/api/albums/{album_id}")
+def get_album(album_id: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    albums = load_albums()
+    album  = albums.get(album_id)
+    if not album:
+        return JSONResponse(status_code=404, content={"error": "Album not found"})
+    if album.get("owner") != user and user != "admin":
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+
+    kept = [p for p in album.get("photos", [])
+            if can_access_path(user, p) and os.path.exists(secure_path(p))]
+    if len(kept) != len(album.get("photos", [])):
+        # Quietly prune references to files that no longer exist
+        album["photos"] = kept
+        save_albums(albums)
+
+    return {"id": album_id, "name": album["name"], "photos": [f"/media/{p}" for p in kept]}
+
+
+class AlbumPhotosRequest(BaseModel):
+    paths: list[str] = []
+
+@app.post("/api/albums/{album_id}/photos/add")
+def add_album_photos(album_id: str, body: AlbumPhotosRequest, request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    albums = load_albums()
+    album  = albums.get(album_id)
+    if not album:
+        return JSONResponse(status_code=404, content={"error": "Album not found"})
+    if album.get("owner") != user and user != "admin":
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    added = 0
+    for p in body.paths:
+        p = p.strip("/")
+        if not can_access_path(user, p):
+            continue
+        if p not in album["photos"]:
+            album["photos"].append(p)
+            added += 1
+    save_albums(albums)
+    return {"status": "ok", "added": added, "count": len(album["photos"])}
+
+
+@app.post("/api/albums/{album_id}/photos/remove")
+def remove_album_photos(album_id: str, body: AlbumPhotosRequest, request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    albums = load_albums()
+    album  = albums.get(album_id)
+    if not album:
+        return JSONResponse(status_code=404, content={"error": "Album not found"})
+    if album.get("owner") != user and user != "admin":
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    remove_set = {p.strip("/") for p in body.paths}
+    album["photos"] = [p for p in album["photos"] if p not in remove_set]
+    save_albums(albums)
+    return {"status": "ok", "count": len(album["photos"])}
+
+
+# ── Favorites API ──────────────────────────────────────────────────────────────
+
+@app.get("/api/favorites")
+def list_favorites(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    favs = load_favorites().get(user, [])
+    favs = [p for p in favs if can_access_path(user, p) and os.path.exists(secure_path(p))]
+    return {"photos": [f"/media/{p}" for p in favs]}
+
+
+class FavoriteToggleRequest(BaseModel):
+    path: str = ""
+
+@app.post("/api/favorites/toggle")
+def toggle_favorite(body: FavoriteToggleRequest, request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    p = body.path.strip("/")
+    if not p or not can_access_path(user, p):
+        return JSONResponse(status_code=403, content={"error": "Access denied"})
+    favs_all = load_favorites()
+    favs     = favs_all.get(user, [])
+    if p in favs:
+        favs.remove(p)
+        starred = False
+    else:
+        favs.append(p)
+        starred = True
+    favs_all[user] = favs
+    save_favorites(favs_all)
+    return {"starred": starred}
 
 
 def page(page_key: str, status: int = 200, user: str | None = None) -> HTMLResponse:
