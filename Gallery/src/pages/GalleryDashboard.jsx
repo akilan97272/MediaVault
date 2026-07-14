@@ -207,7 +207,7 @@ function FolderMoveModal({ items, folderTree, onClose, onMoved }) {
           </div>
 
           {/* Folder browser */}
-          <div style={fm.folderGrid}>
+          <div style={fm.folderGrid} className="fm-folder-grid">
             {children.length === 0 && (
               <div style={fm.emptyNote}>No subfolders here</div>
             )}
@@ -275,7 +275,18 @@ const fm = {
   },
   folderGrid: {
     display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))",
-    gap: 8, padding: "4px 2px", minHeight: 90, maxHeight: 260, overflowY: "auto",
+    gap: 8, padding: "4px 2px",
+    minHeight: 90,
+    maxHeight: 260,        // adaptive — shrinks to fit a few folders, caps
+                            // and scrolls once there are many. The overflow
+                            // rule that actually matters lives in the
+                            // .fm-folder-grid CSS class below (see the
+                            // embedded <style> block further down) — it
+                            // needs !important to survive a CSS bleed from
+                            // the Random Photos widget's own styling.
+    overflowY: "auto",
+    overflowX: "hidden",
+    alignContent: "start",
   },
   folderTile: {
     display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
@@ -1401,7 +1412,7 @@ function FolderSourceModal({ folderTree, selectedFolders, onChange, onClose }) {
 
           {/* Folder tiles — click the checkbox to select as a source,
               click the folder itself to browse into its subfolders */}
-          <div style={fm.folderGrid}>
+          <div style={fm.folderGrid} className="fm-folder-grid">
             {children.length === 0 && (
               <div style={fm.emptyNote}>No subfolders here</div>
             )}
@@ -2673,6 +2684,16 @@ function handleTouchEnd() {
         .rw-wrap-override .rw-grid,
         .rw-wrap-override .fp-list { overflow: hidden !important; }
         .rw-wrap-override .fp-list { overflow-y: auto !important; }
+        /* Move-to / Photo-source folder grids can render as a descendant of
+           the Random Photos card (e.g. opened via its "Folders" picker) —
+           without this, the "overflow: visible !important" rule above wins
+           over these grids' own scroll and lets folder tiles spill out
+           uncontained instead of scrolling. */
+        .fm-folder-grid,
+        .rw-wrap-override .fm-folder-grid {
+          overflow-y: auto !important;
+          overflow-x: hidden !important;
+        }
         @media (max-width: 767px) {
           /* Keep folder picker from bleeding off left edge on mobile */
           .fp-dropdown { right: 0 !important; left: auto !important; }
@@ -3448,4 +3469,4 @@ const gs = {
     whiteSpace: "nowrap",
   },
   
-}; 
+};
