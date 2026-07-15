@@ -505,7 +505,7 @@ function MediaCard({ src, filename, isVideo, selected, onLightbox, onContextMenu
 /* ── Lightbox ────────────────────────────────────────────── */
 const SLIDESHOW_SPEEDS = [10, 15, 20, 25, 30];
 
-function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, setSlideshowInterval, folderTree, onFileRemoved }) {
+function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, setSlideshowInterval, folderTree, onFileRemoved, starredSet, onToggleStar }) {
   const file = files[index];
   const [playing, setPlaying] = useState(false);
   const [showSpeedPicker, setShowSpeedPicker] = useState(false);
@@ -682,6 +682,20 @@ function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, se
 
       {/* ── Top-right buttons ── */}
       <div style={lb.topRight} onClick={(e) => e.stopPropagation()}>
+        {/* Star / Unstar */}
+        {onToggleStar && (
+          <button
+            style={lb.iconBtn}
+            onClick={() => onToggleStar(relPath)}
+            title={starredSet?.has(relPath) ? "Remove from Starred" : "Add to Starred"}
+          >
+            <svg viewBox="0 0 20 20" width="15" height="15" fill={starredSet?.has(relPath) ? "#f5cb5c" : "none"}>
+              <path d="M10 2.5l2.35 4.76 5.25.76-3.8 3.7.9 5.23L10 14.5l-4.7 2.45.9-5.23-3.8-3.7 5.25-.76z"
+                stroke={starredSet?.has(relPath) ? "#f5cb5c" : "currentColor"} strokeWidth="1.3" strokeLinejoin="round" />
+            </svg>
+          </button>
+        )}
+
         {/* Download */}
         <a href={file} download style={lb.iconBtn} title="Download">
           <svg viewBox="0 0 20 20" fill="none" width="15" height="15">
@@ -889,8 +903,8 @@ const lb = {
     display: "flex", alignItems: "center", justifyContent: "center",
     zIndex: 10,
   },
-  content: { maxWidth: "70vw", maxHeight: "70vh" },
-  media: { maxWidth: "70vw", maxHeight: "70vh", objectFit: "contain", borderRadius: 12 },
+  content: { maxWidth: "92vw", maxHeight: "88vh" },
+  media: { maxWidth: "92vw", maxHeight: "88vh", objectFit: "contain", borderRadius: 12 },
   counter: {
     position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)",
     fontSize: "0.78rem", color: "rgba(255,255,255,0.5)", fontWeight: 500,
@@ -2682,6 +2696,7 @@ function handleTouchEnd() {
         .rw-wrap-override * { overflow: visible !important; }
         /* restore overflow on elements that actually need it */
         .rw-wrap-override .rw-grid,
+        .rw-wrap-override .rw-thumb,
         .rw-wrap-override .fp-list { overflow: hidden !important; }
         .rw-wrap-override .fp-list { overflow-y: auto !important; }
         /* Move-to / Photo-source folder grids can render as a descendant of
@@ -3080,6 +3095,8 @@ function handleTouchEnd() {
           slideshowInterval={slideshowInterval}
           setSlideshowInterval={setSlideshowInterval}
           folderTree={folderTree}
+          starredSet={starredSet}
+          onToggleStar={isAdmin ? null : toggleStar}
           onFileRemoved={() => {
             setLightboxIndex(null);
             loadMedia(currentPath);
@@ -3099,6 +3116,8 @@ function handleTouchEnd() {
           slideshowInterval={slideshowInterval}
           setSlideshowInterval={setSlideshowInterval}
           folderTree={folderTree}
+          starredSet={starredSet}
+          onToggleStar={isAdmin ? null : toggleStar}
           onFileRemoved={() => {
             setRandomLightbox(null);
             loadRandomPhotos(randomCount, randomFolders);
@@ -3117,6 +3136,8 @@ function handleTouchEnd() {
           slideshowInterval={slideshowInterval}
           setSlideshowInterval={setSlideshowInterval}
           folderTree={folderTree}
+          starredSet={starredSet}
+          onToggleStar={toggleStar}
           onFileRemoved={() => {
             setStarredLightbox(null);
             loadStarred();
@@ -3135,6 +3156,8 @@ function handleTouchEnd() {
           slideshowInterval={slideshowInterval}
           setSlideshowInterval={setSlideshowInterval}
           folderTree={folderTree}
+          starredSet={starredSet}
+          onToggleStar={isAdmin ? null : toggleStar}
           onFileRemoved={() => {
             setAlbumLightbox(null);
             loadAlbumDetail(currentAlbumId);
