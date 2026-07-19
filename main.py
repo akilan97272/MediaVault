@@ -20,7 +20,7 @@ from passlib.context import CryptContext
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from workerFiles.file_renamer_scheduler import start_scheduler, stop_scheduler, get_scheduler_status
 from fastapi.middleware.cors import CORSMiddleware
@@ -386,12 +386,18 @@ def _remove_path_everywhere(rel_path: str) -> None:
     """rel_path may be a single file OR a folder prefix (from a folder
     delete) — strip it out of every album and every user's favorites so
     deleted photos don't linger as broken references."""
+    def _gone(p: str) -> bool:
+        return p == rel_path or p.startswith(rel_path + "/")
+
     albums  = load_albums()
     changed = False
     for a in albums.values():
         before = len(a.get("photos", []))
-        a["photos"] = [p for p in a.get("photos", []) if not (p == rel_path or p.startswith(rel_path + "/"))]
+        a["photos"] = [p for p in a.get("photos", []) if not _gone(p)]
         if len(a["photos"]) != before:
+            changed = True
+        if a.get("cover") and _gone(a["cover"]):
+            a["cover"] = None
             changed = True
     if changed:
         save_albums(albums)
@@ -400,7 +406,7 @@ def _remove_path_everywhere(rel_path: str) -> None:
     changed  = False
     for user, favs in favs_all.items():
         before = len(favs)
-        favs_all[user] = [p for p in favs if not (p == rel_path or p.startswith(rel_path + "/"))]
+        favs_all[user] = [e for e in favs if not _gone(_fav_path(e))]
         if len(favs_all[user]) != before:
             changed = True
     if changed:
@@ -411,18 +417,28 @@ def _rename_path_everywhere(old_rel: str, new_rel: str) -> None:
     """Keeps album/favorite references pointing at the right place after a
     move — works for both single-file and whole-folder moves via prefix
     rewriting."""
+    def _renamed(p: str) -> str | None:
+        if p == old_rel:
+            return new_rel
+        if p.startswith(old_rel + "/"):
+            return new_rel + p[len(old_rel):]
+        return None
+
     albums  = load_albums()
     changed = False
     for a in albums.values():
         new_list = []
         for p in a.get("photos", []):
-            if p == old_rel:
-                new_list.append(new_rel); changed = True
-            elif p.startswith(old_rel + "/"):
-                new_list.append(new_rel + p[len(old_rel):]); changed = True
+            r = _renamed(p)
+            if r is not None:
+                new_list.append(r); changed = True
             else:
                 new_list.append(p)
         a["photos"] = new_list
+        if a.get("cover"):
+            r = _renamed(a["cover"])
+            if r is not None:
+                a["cover"] = r; changed = True
     if changed:
         save_albums(albums)
 
@@ -430,13 +446,17 @@ def _rename_path_everywhere(old_rel: str, new_rel: str) -> None:
     changed  = False
     for user, favs in favs_all.items():
         new_list = []
-        for p in favs:
-            if p == old_rel:
-                new_list.append(new_rel); changed = True
-            elif p.startswith(old_rel + "/"):
-                new_list.append(new_rel + p[len(old_rel):]); changed = True
+        for e in favs:
+            p = _fav_path(e)
+            r = _renamed(p)
+            if r is not None:
+                changed = True
+                if isinstance(e, str):
+                    new_list.append(r)
+                else:
+                    new_list.append({**e, "path": r})
             else:
-                new_list.append(p)
+                new_list.append(e)
         favs_all[user] = new_list
     if changed:
         save_favorites(favs_all)
@@ -1133,7 +1153,10 @@ def delete_media(request: Request, path: str = "", filename: str = ""):
 
     target = secure_path(full_sub)
     if not os.path.exists(target):
-        raise HTTPException(status_code=404, detail="File not found")
+        # Already gone — e.g. this was a subfolder/file inside a parent
+        # folder that was deleted earlier in the same multi-select batch.
+        # Treat it as successfully deleted rather than an error.
+        return {"status": "deleted", "already_gone": True}
     if os.path.abspath(target) == _SHARED_ABS:
         raise HTTPException(status_code=403, detail="Cannot delete the shared folder")
 
@@ -1243,11 +1266,18 @@ def list_albums(request: Request):
         if a.get("owner") != user and user != "admin":
             continue
         photos = [p for p in a.get("photos", []) if can_access_path(user, p)]
+        cover_path = a.get("cover")
+        if cover_path and cover_path in photos:
+            cover = f"/media/{cover_path}"
+        elif photos:
+            cover = f"/media/{photos[0]}"
+        else:
+            cover = None
         out.append({
             "id":      aid,
             "name":    a.get("name", ""),
             "count":   len(photos),
-            "cover":   f"/media/{photos[0]}" if photos else None,
+            "cover":   cover,
             "created": a.get("created"),
         })
     out.sort(key=lambda a: a["created"] or "", reverse=True)
@@ -1270,7 +1300,7 @@ def create_album(body: AlbumCreateRequest, request: Request):
     albums    = load_albums()
     album_id  = uuid.uuid4().hex[:12]
     created   = datetime.now().isoformat()
-    albums[album_id] = {"id": album_id, "name": name, "owner": user, "created": created, "photos": []}
+    albums[album_id] = {"id": album_id, "name": name, "owner": user, "created": created, "photos": [], "cover": None}
     save_albums(albums)
     return {"id": album_id, "name": name, "count": 0, "cover": None, "created": created}
 
@@ -1289,6 +1319,56 @@ def delete_album(album_id: str, request: Request):
     del albums[album_id]
     save_albums(albums)
     return {"status": "deleted"}
+
+
+@app.get("/api/albums/suggestions")
+def album_suggestions(request: Request):
+    """'You starred N photos from this folder recently — want an album?'
+    Looks at favorites starred in the last 7 days, groups them by folder,
+    and suggests any folder with at least 3 that isn't already fully
+    covered by an existing album.
+
+    IMPORTANT: this route must be registered before /api/albums/{album_id}
+    below — otherwise FastAPI matches "suggestions" as an album_id and this
+    handler never runs."""
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+    favs = load_favorites().get(user, [])
+    cutoff = datetime.now() - timedelta(days=7)
+    recent_by_folder: dict[str, list[str]] = {}
+    for e in favs:
+        p = _fav_path(e)
+        t = _fav_time(e)
+        if not p or not t or not can_access_path(user, p) or not os.path.exists(secure_path(p)):
+            continue
+        try:
+            if datetime.fromisoformat(t) < cutoff:
+                continue
+        except ValueError:
+            continue
+        folder = "/".join(p.split("/")[:-1])
+        if not folder:
+            continue  # true-root files have no meaningful "folder" to group by
+        recent_by_folder.setdefault(folder, []).append(p)
+
+    albums = load_albums()
+    existing_sets = [set(a.get("photos", [])) for a in albums.values() if a.get("owner") == user]
+
+    suggestions = []
+    for folder, paths in recent_by_folder.items():
+        if len(paths) < 3:
+            continue
+        if any(set(paths).issubset(s) for s in existing_sets):
+            continue  # already turned into (or subsumed by) an album
+        suggestions.append({
+            "folder": folder,
+            "count": len(paths),
+            "paths": [f"/media/{p}" for p in paths],
+        })
+    suggestions.sort(key=lambda s: -s["count"])
+    return {"suggestions": suggestions[:5]}
 
 
 @app.get("/api/albums/{album_id}")
@@ -1310,7 +1390,12 @@ def get_album(album_id: str, request: Request):
         album["photos"] = kept
         save_albums(albums)
 
-    return {"id": album_id, "name": album["name"], "photos": [f"/media/{p}" for p in kept]}
+    cover = a_cover if (a_cover := album.get("cover")) and a_cover in kept else None
+    return {
+        "id": album_id, "name": album["name"],
+        "photos": [f"/media/{p}" for p in kept],
+        "cover": f"/media/{cover}" if cover else None,
+    }
 
 
 class AlbumPhotosRequest(BaseModel):
@@ -1352,11 +1437,77 @@ def remove_album_photos(album_id: str, body: AlbumPhotosRequest, request: Reques
         return JSONResponse(status_code=403, content={"error": "Forbidden"})
     remove_set = {p.strip("/") for p in body.paths}
     album["photos"] = [p for p in album["photos"] if p not in remove_set]
+    if album.get("cover") in remove_set:
+        album["cover"] = None
     save_albums(albums)
     return {"status": "ok", "count": len(album["photos"])}
 
 
+class AlbumCoverRequest(BaseModel):
+    path: str = ""
+
+@app.post("/api/albums/{album_id}/cover")
+def set_album_cover(album_id: str, body: AlbumCoverRequest, request: Request):
+    """Pick any photo already in the album as its cover thumbnail. Passing
+    an empty path clears the explicit cover (falls back to the first photo)."""
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    albums = load_albums()
+    album  = albums.get(album_id)
+    if not album:
+        return JSONResponse(status_code=404, content={"error": "Album not found"})
+    if album.get("owner") != user and user != "admin":
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    p = body.path.strip("/")
+    if p and p not in album.get("photos", []):
+        return JSONResponse(status_code=400, content={"error": "Cover must be a photo already in this album"})
+    album["cover"] = p or None
+    save_albums(albums)
+    return {"status": "ok", "cover": f"/media/{p}" if p else None}
+
+
+class AlbumReorderRequest(BaseModel):
+    paths: list[str] = []
+
+@app.post("/api/albums/{album_id}/reorder")
+def reorder_album_photos(album_id: str, body: AlbumReorderRequest, request: Request):
+    """Sets the album's photo order to match the given list (drag-and-drop
+    reordering on the frontend). Any path not already in the album is
+    ignored; any existing photo missing from the given list is appended at
+    the end, as a safety net against stale client-side state."""
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    albums = load_albums()
+    album  = albums.get(album_id)
+    if not album:
+        return JSONResponse(status_code=404, content={"error": "Album not found"})
+    if album.get("owner") != user and user != "admin":
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    current   = set(album.get("photos", []))
+    new_order = []
+    seen      = set()
+    for p in body.paths:
+        p = p.strip("/")
+        if p in current and p not in seen:
+            new_order.append(p)
+            seen.add(p)
+    missing = [p for p in album.get("photos", []) if p not in seen]
+    album["photos"] = new_order + missing
+    save_albums(albums)
+    return {"status": "ok", "photos": [f"/media/{p}" for p in album["photos"]]}
+
+
 # ── Favorites API ──────────────────────────────────────────────────────────────
+# Each entry is {"path": rel_path, "starred_at": iso timestamp}. Older data
+# may still have plain path strings — _fav_path() normalizes either shape.
+
+def _fav_path(entry) -> str:
+    return entry if isinstance(entry, str) else entry.get("path", "")
+
+def _fav_time(entry) -> str | None:
+    return None if isinstance(entry, str) else entry.get("starred_at")
 
 @app.get("/api/favorites")
 def list_favorites(request: Request):
@@ -1364,8 +1515,10 @@ def list_favorites(request: Request):
     if not user:
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
     favs = load_favorites().get(user, [])
-    favs = [p for p in favs if can_access_path(user, p) and os.path.exists(secure_path(p))]
-    return {"photos": [f"/media/{p}" for p in favs]}
+    favs = [e for e in favs if can_access_path(user, _fav_path(e)) and os.path.exists(secure_path(_fav_path(e)))]
+    # Most recently starred first
+    favs.sort(key=lambda e: _fav_time(e) or "", reverse=True)
+    return {"photos": [f"/media/{_fav_path(e)}" for e in favs]}
 
 
 class FavoriteToggleRequest(BaseModel):
@@ -1381,15 +1534,16 @@ def toggle_favorite(body: FavoriteToggleRequest, request: Request):
         return JSONResponse(status_code=403, content={"error": "Access denied"})
     favs_all = load_favorites()
     favs     = favs_all.get(user, [])
-    if p in favs:
-        favs.remove(p)
+    if any(_fav_path(e) == p for e in favs):
+        favs = [e for e in favs if _fav_path(e) != p]
         starred = False
     else:
-        favs.append(p)
+        favs.append({"path": p, "starred_at": datetime.now().isoformat()})
         starred = True
     favs_all[user] = favs
     save_favorites(favs_all)
     return {"starred": starred}
+
 
 
 def page(page_key: str, status: int = 200, user: str | None = None) -> HTMLResponse:

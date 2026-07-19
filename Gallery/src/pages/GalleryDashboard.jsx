@@ -1509,15 +1509,50 @@ const fsm = {
 };
 
 /* ── Starred Grid View ──────────────────────────────────── */
-function StarredGridView({ photos, loading, starredSet, onToggleStar, onOpenLightbox, onAddToAlbum }) {
+function StarredGridView({
+  photos, loading, starredSet, onToggleStar, onOpenLightbox, onAddToAlbum,
+  suggestions, onCreateFromSuggestion, onDismissSuggestion,
+}) {
   const [ctxMenu, setCtxMenu] = useState(null);
+  const [creatingFolder, setCreatingFolder] = useState(null); // folder currently being turned into an album
 
   function relPathOf(url) {
     return decodeURIComponent(url.replace(/^\/media\//, ""));
   }
 
+  async function handleCreate(sugg) {
+    setCreatingFolder(sugg.folder);
+    try {
+      await onCreateFromSuggestion(sugg);
+    } finally {
+      setCreatingFolder(null);
+    }
+  }
+
   return (
     <div>
+      {suggestions?.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+          {suggestions.map((sugg) => (
+            <div key={sugg.folder} style={sv.suggestionCard}>
+              <span style={sv.suggestionIcon}>✨</span>
+              <span style={sv.suggestionText}>
+                You starred {sugg.count} photos from <strong>{sugg.folder.split("/").pop()}</strong> this week — want to make an album?
+              </span>
+              <button
+                className="glass-btn-accent"
+                style={{ flexShrink: 0 }}
+                onClick={() => handleCreate(sugg)}
+                disabled={creatingFolder === sugg.folder}
+              >
+                {creatingFolder === sugg.folder ? "Creating…" : "Create Album"}
+              </button>
+              <button style={sv.suggestionDismiss} onClick={() => onDismissSuggestion(sugg.folder)} title="Dismiss">✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div style={sv.header}>
         <h2 style={sv.title}>★ Starred</h2>
         <span style={sv.count}>{photos.length} photo{photos.length !== 1 ? "s" : ""}</span>
@@ -1700,11 +1735,32 @@ function AlbumsGridView({ albums, loading, onOpen, onCreated, onDeleted }) {
 }
 
 /* ── Single Album View ─────────────────────────────────── */
-function AlbumDetailGridView({ album, loading, starredSet, onToggleStar, onOpenLightbox, onRemovePhoto, onBack }) {
+function AlbumDetailGridView({ album, loading, starredSet, onToggleStar, onOpenLightbox, onRemovePhoto, onSetCover, onReorder, onBack }) {
   const [ctxMenu, setCtxMenu] = useState(null);
+  const [localOrder, setLocalOrder] = useState([]); // photo URLs, optimistic drag order
+  const dragFrom = useRef(null);
+  const [dragOverIdx, setDragOverIdx] = useState(null);
 
   function relPathOf(url) {
     return decodeURIComponent(url.replace(/^\/media\//, ""));
+  }
+
+  // Keep local drag order in sync whenever the album's real photo list changes
+  useEffect(() => {
+    setLocalOrder(album?.photos || []);
+  }, [album?.photos]);
+
+  function handleDrop(dropIdx) {
+    if (dragFrom.current === null || dragFrom.current === dropIdx) {
+      dragFrom.current = null; setDragOverIdx(null);
+      return;
+    }
+    const next = [...localOrder];
+    const [moved] = next.splice(dragFrom.current, 1);
+    next.splice(dropIdx, 0, moved);
+    setLocalOrder(next);
+    dragFrom.current = null; setDragOverIdx(null);
+    onReorder(next.map(relPathOf));
   }
 
   if (loading || !album) {
@@ -1741,21 +1797,43 @@ function AlbumDetailGridView({ album, loading, starredSet, onToggleStar, onOpenL
         </div>
       )}
 
+      {album.photos.length > 1 && (
+        <p style={{ fontSize: "0.74rem", color: "var(--text-3)", margin: "0 0 8px" }}>
+          Drag photos to reorder them.
+        </p>
+      )}
+
       <main style={gs.grid}>
-        {album.photos.map((url, i) => {
+        {localOrder.map((url, i) => {
           const relPath  = relPathOf(url);
           const filename = relPath.split("/").pop();
           const isVideo  = /\.(mp4|webm|mkv)$/i.test(url);
+          const isCover  = album.cover === url;
           return (
-            <div key={url} style={{ position: "relative" }}>
+            <div
+              key={url}
+              style={{
+                position: "relative",
+                opacity: dragFrom.current === i ? 0.4 : 1,
+                outline: dragOverIdx === i ? "2px dashed var(--accent)" : "none",
+                outlineOffset: 2,
+              }}
+              draggable
+              onDragStart={() => { dragFrom.current = i; }}
+              onDragOver={(e) => { e.preventDefault(); setDragOverIdx(i); }}
+              onDragLeave={() => setDragOverIdx((cur) => (cur === i ? null : cur))}
+              onDrop={(e) => { e.preventDefault(); handleDrop(i); }}
+              onDragEnd={() => { dragFrom.current = null; setDragOverIdx(null); }}
+            >
               <MediaCard
                 src={url} filename={filename} isVideo={isVideo}
                 selected={false}
                 starred={starredSet.has(relPath)}
                 onToggleStar={() => onToggleStar(relPath)}
                 onLightbox={() => onOpenLightbox(i)}
-                onContextMenu={(x, y) => setCtxMenu({ x, y, relPath })}
+                onContextMenu={(x, y) => setCtxMenu({ x, y, relPath, url })}
               />
+              {isCover && <span style={av.coverBadge}>Cover</span>}
             </div>
           );
         })}
@@ -1766,6 +1844,16 @@ function AlbumDetailGridView({ album, loading, starredSet, onToggleStar, onOpenL
           x={ctxMenu.x} y={ctxMenu.y}
           onClose={() => setCtxMenu(null)}
           items={[
+            {
+              label: "Set as Cover",
+              icon: (
+                <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                  <rect x="3" y="3" width="14" height="14" stroke="currentColor" strokeWidth="1.4" />
+                  <path d="M3 13l4-4 3 3 2-2 5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              ),
+              action: () => onSetCover(ctxMenu.relPath),
+            },
             {
               label: "Remove from Album",
               icon: (
@@ -1913,6 +2001,17 @@ const sv = {
   },
   title: { fontSize: "1.1rem", fontWeight: 700, color: "var(--text-1)", margin: 0 },
   count: { fontSize: "0.82rem", color: "var(--text-3)" },
+  suggestionCard: {
+    display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+    background: "var(--accent-bg)", border: "1px solid var(--accent-border)",
+    padding: "10px 14px",
+  },
+  suggestionIcon: { fontSize: "1.1rem", flexShrink: 0 },
+  suggestionText: { flex: 1, fontSize: "0.84rem", color: "var(--text-1)", minWidth: 180 },
+  suggestionDismiss: {
+    background: "transparent", border: "none", cursor: "pointer",
+    color: "var(--text-3)", fontSize: "0.8rem", flexShrink: 0, padding: "2px 4px",
+  },
 };
 
 const av = {
@@ -1939,6 +2038,13 @@ const av = {
     background: "rgba(0,0,0,0.5)", color: "#fff",
     border: "none", cursor: "pointer", fontSize: "0.7rem",
     display: "flex", alignItems: "center", justifyContent: "center",
+  },
+  coverBadge: {
+    position: "absolute", bottom: 6, left: 6,
+    background: "rgba(0,0,0,0.65)", color: "#f5cb5c",
+    fontSize: "0.65rem", fontWeight: 700, textTransform: "uppercase",
+    letterSpacing: "0.04em", padding: "2px 6px",
+    pointerEvents: "none",
   },
 };
 
@@ -2197,6 +2303,8 @@ export default function GalleryDashboard() {
   const [albumDetail, setAlbumDetail] = useState(null); // { id, name, photos }
   const [albumDetailLoading, setAlbumDetailLoading] = useState(false);
   const [albumPickerTarget, setAlbumPickerTarget] = useState(null); // rel path(s) being added to an album
+  const [suggestions, setSuggestions] = useState([]);
+  const [dismissedSuggestions, setDismissedSuggestions] = useState(new Set()); // folder names, session-only
   const [uploadNotice, setUploadNotice] = useState(null); // duplicate-upload banner text
   const [files, setFiles]             = useState([]);
   const [folders, setFolders]         = useState([]);
@@ -2303,9 +2411,40 @@ const { user, isAdmin } = useAuth();
     }
   }
 
+  async function loadSuggestions() {
+    if (isAdmin) return;
+    try {
+      const res = await fetch("/api/albums/suggestions");
+      if (res.ok) setSuggestions((await res.json()).suggestions || []);
+    } catch (e) { console.error(e); }
+  }
+
+  async function createAlbumFromSuggestion(sugg) {
+    const relPaths = sugg.paths.map((u) => decodeURIComponent(u.replace(/^\/media\//, "")));
+    const name = sugg.folder.split("/").pop();
+    try {
+      const res = await fetch("/api/albums", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok) {
+        const album = await res.json();
+        await fetch(`/api/albums/${album.id}/photos/add`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paths: relPaths }),
+        });
+      }
+    } finally {
+      setDismissedSuggestions((prev) => new Set(prev).add(sugg.folder));
+    }
+  }
+
   function openStarredView() {
     setView("starred");
     loadStarred();
+    loadSuggestions();
   }
   function openAlbumsView() {
     setView("albums");
@@ -2402,28 +2541,53 @@ const { user, isAdmin } = useAuth();
 
   /* ── Delete helpers ────────────────────────────────────── */
   async function deleteFile(filename) {
-    await fetch(
+    const res = await fetch(
       `/api/media?path=${encodeURIComponent(currentPath)}&filename=${encodeURIComponent(filename)}`,
       { method: "DELETE" }
     );
+    return res.ok;
   }
 
   async function deleteFolderByName(name) {
     const fullPath = currentPath ? `${currentPath}/${name}` : name;
-    await fetch(
+    const res = await fetch(
       `/api/media?path=${encodeURIComponent(fullPath)}&filename=`,
       { method: "DELETE" }
     );
-    fetch("/api/tree").then((r) => r.json()).then((d) => setFolderTree(d.tree || []));
+    return res.ok;
   }
 
   async function deleteSelected() {
-    const total = totalSelected;
-    if (!confirm(`Delete ${total} item(s)?`)) return;
-    for (const name of selected)        await deleteFile(name);
-    for (const name of selectedFolders) await deleteFolderByName(name);
+    const fileNames   = [...selected];
+    const folderNames = [...selectedFolders];
+    const total = fileNames.length + folderNames.length;
+    if (!total) return;
+    if (!confirm(
+      `Delete ${total} item${total !== 1 ? "s" : ""}` +
+      (folderNames.length ? ` (${folderNames.length} folder${folderNames.length !== 1 ? "s" : ""} and everything inside ${folderNames.length !== 1 ? "them" : "it"})` : "") +
+      "? This cannot be undone."
+    )) return;
+
+    // Folders first — if a selected file happens to live inside a selected
+    // folder that's about to be removed, deleting the folder first avoids
+    // a pointless "not found" race on the file's own delete call. Both
+    // helpers already tolerate an already-gone target as success anyway.
+    const folderResults = await Promise.all(folderNames.map((name) => deleteFolderByName(name)));
+    const fileResults   = await Promise.all(fileNames.map((name) => deleteFile(name)));
+
+    const failedFolders = folderNames.filter((_, i) => !folderResults[i]);
+    const failedFiles    = fileNames.filter((_, i) => !fileResults[i]);
+
     clearSelection();
     loadMedia(currentPath);
+    fetch("/api/tree").then((r) => r.json()).then((d) => setFolderTree(d.tree || []));
+
+    if (failedFolders.length || failedFiles.length) {
+      const parts = [];
+      if (failedFolders.length) parts.push(`${failedFolders.length} folder${failedFolders.length !== 1 ? "s" : ""}`);
+      if (failedFiles.length)   parts.push(`${failedFiles.length} file${failedFiles.length !== 1 ? "s" : ""}`);
+      alert(`Couldn't delete ${parts.join(" and ")} — you may not have permission, or they were already removed.`);
+    }
   }
 
   /* ── Download helper ───────────────────────────────────── */
@@ -2499,11 +2663,11 @@ const { user, isAdmin } = useAuth();
           icon:  <CheckIcon />,
           action: () => toggleSelectFile(filename),
         },
-        ...(files.length > 1 ? [
+        ...(files.length + folders.length > 1 ? [
           {
-            label: `Select All (${files.length})`,
+            label: `Select All (${files.length + folders.length})`,
             icon:  <CheckAllIcon />,
-            action: () => setSelected(new Set(files)),
+            action: () => { setSelected(new Set(files)); setSelectedFolders(new Set(folders)); },
           },
         ] : []),
         "divider",
@@ -2551,8 +2715,9 @@ const { user, isAdmin } = useAuth();
           danger: true,
           action: async () => {
             if (!confirm(`Delete "${filename}"?`)) return;
-            await deleteFile(filename);
+            const ok = await deleteFile(filename);
             loadMedia(currentPath);
+            if (!ok) alert(`Couldn't delete "${filename}" — you may not have permission.`);
           },
         },
         ...(totalSelected > 1 ? [
@@ -2582,6 +2747,13 @@ const { user, isAdmin } = useAuth();
           icon:  <CheckIcon />,
           action: () => toggleSelectFolder(folderName),
         },
+        ...(files.length + folders.length > 1 ? [
+          {
+            label: `Select All (${files.length + folders.length})`,
+            icon:  <CheckAllIcon />,
+            action: () => { setSelected(new Set(files)); setSelectedFolders(new Set(folders)); },
+          },
+        ] : []),
         "divider",
         {
           label: "Move to…",
@@ -2594,11 +2766,21 @@ const { user, isAdmin } = useAuth();
           icon:  <TrashIcon />,
           danger: true,
           action: async () => {
-            if (!confirm(`Delete folder "${folderName}" and all its contents?`)) return;
-            await deleteFolderByName(folderName);
+            if (!confirm(`Delete folder "${folderName}" and all its contents? This cannot be undone.`)) return;
+            const ok = await deleteFolderByName(folderName);
             loadMedia(currentPath);
+            fetch("/api/tree").then((r) => r.json()).then((d) => setFolderTree(d.tree || []));
+            if (!ok) alert(`Couldn't delete "${folderName}" — you may not have permission.`);
           },
         },
+        ...(totalSelected > 1 ? [
+          {
+            label: `Delete ${totalSelected} selected`,
+            icon:  <TrashIcon />,
+            danger: true,
+            action: deleteSelected,
+          },
+        ] : []),
       ],
     });
   }
@@ -3032,6 +3214,9 @@ function handleTouchEnd() {
             onToggleStar={toggleStar}
             onOpenLightbox={(i) => setStarredLightbox(i)}
             onAddToAlbum={(relPath) => setAlbumPickerTarget([relPath])}
+            suggestions={suggestions.filter((s) => !dismissedSuggestions.has(s.folder))}
+            onCreateFromSuggestion={createAlbumFromSuggestion}
+            onDismissSuggestion={(folder) => setDismissedSuggestions((prev) => new Set(prev).add(folder))}
           />
         )}
 
@@ -3061,6 +3246,23 @@ function handleTouchEnd() {
                 body: JSON.stringify({ paths: [relPath] }),
               });
               loadAlbumDetail(currentAlbumId);
+            }}
+            onSetCover={async (relPath) => {
+              await fetch(`/api/albums/${currentAlbumId}/cover`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ path: relPath }),
+              });
+              loadAlbumDetail(currentAlbumId);
+            }}
+            onReorder={async (relPaths) => {
+              await fetch(`/api/albums/${currentAlbumId}/reorder`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ paths: relPaths }),
+              });
+              // No refetch here — the grid already reflects the new order
+              // optimistically, and refetching mid-drag would just flicker.
             }}
             onBack={openAlbumsView}
           />
