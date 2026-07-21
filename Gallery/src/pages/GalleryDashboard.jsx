@@ -1,5 +1,5 @@
 // pages/GalleryDashboard.jsx
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import BaseLayout from "../components/BaseLayout";
 import Sidebar from "../components/Sidebar";
 import TopBar from "../components/TopBar";
@@ -305,6 +305,129 @@ const fm = {
   },
 };
 
+/* ── Shared Folder Grid — rich cards with uploader/date/size/download ── */
+function SharedFolderGrid({ folders, items, loading, starredSet, onToggleStar, onOpenFolder, onOpenLightbox }) {
+  function fmtSize(bytes) {
+    if (!bytes) return "0 B";
+    const units = ["B", "KB", "MB", "GB"];
+    let i = 0, n = bytes;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return `${n.toFixed(n >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
+  }
+  function fmtDate(iso) {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  }
+
+  return (
+    <main style={sf.grid}>
+      {loading && (
+        <div style={gs.loadingState}>
+          <div className="loading-spinner" />
+          <span style={{ color: "var(--text-3)", fontSize: "0.9rem" }}>Loading…</span>
+        </div>
+      )}
+
+      {!loading && folders.length === 0 && items.length === 0 && (
+        <div style={gs.emptyState}>
+          <div style={{ fontSize: "2.5rem" }}>🤝</div>
+          <p style={{ color: "var(--text-3)", fontSize: "0.9rem" }}>Nothing shared here yet</p>
+        </div>
+      )}
+
+      {/* Subfolders within shared, if any — plain folder cards */}
+      {!loading && folders.map((folder) => (
+        <div key={folder} style={{ position: "relative" }} className="folder-card-wrap">
+          <FolderCard name={folder} onClick={() => onOpenFolder(folder)} onContextMenu={() => {}} />
+        </div>
+      ))}
+
+      {/* Files — compact detail cards */}
+      {!loading && items.map((item) => {
+        const relPath = decodeURIComponent(item.url.replace(/^\/media\//, ""));
+        const starred = starredSet.has(relPath);
+        return (
+          <div key={item.url} style={sf.card}>
+            <div style={sf.thumbWrap} onClick={() => onOpenLightbox(item.url)}>
+              {item.is_video ? (
+                <div style={gs.videoThumb}>
+                  <svg viewBox="0 0 24 24" fill="none" width="24" height="24" style={{ color: "rgba(255,255,255,0.85)" }}>
+                    <polygon points="6,4 20,12 6,20" fill="currentColor" />
+                  </svg>
+                </div>
+              ) : (
+                <img src={item.url} loading="lazy" decoding="async" style={sf.thumb} alt="" />
+              )}
+              {onToggleStar && (
+                <button
+                  style={gs.starToggle}
+                  onClick={(e) => { e.stopPropagation(); onToggleStar(relPath); }}
+                  title={starred ? "Remove from Starred" : "Add to Starred"}
+                >
+                  <svg viewBox="0 0 20 20" width="14" height="14" fill={starred ? "#f5cb5c" : "none"}>
+                    <path d="M10 2.5l2.35 4.76 5.25.76-3.8 3.7.9 5.23L10 14.5l-4.7 2.45.9-5.23-3.8-3.7 5.25-.76z"
+                      stroke={starred ? "#f5cb5c" : "#fff"} strokeWidth="1.3" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            <div style={sf.meta}>
+              <div style={sf.metaRow}>
+                <svg viewBox="0 0 20 20" fill="none" width="12" height="12" style={{ flexShrink: 0, color: "var(--text-3)" }}>
+                  <circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.4" />
+                  <path d="M4 17c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                </svg>
+                <span style={sf.metaText}>{item.uploader}</span>
+              </div>
+              <div style={sf.metaRow}>
+                <span style={sf.metaSub}>{fmtDate(item.uploaded_at)} · {fmtSize(item.size)}</span>
+              </div>
+            </div>
+            <a href={item.url} download={item.filename} style={sf.downloadBtn} title="Download">
+              <svg viewBox="0 0 20 20" fill="none" width="13" height="13">
+                <path d="M10 3v10M6 9l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M3 15v1a1 1 0 001 1h12a1 1 0 001-1v-1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              Download
+            </a>
+          </div>
+        );
+      })}
+    </main>
+  );
+}
+
+const sf = {
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+    gap: 12, padding: "10px 0",
+  },
+  card: {
+    display: "flex", flexDirection: "column",
+    background: "var(--glass-bg)", border: "1px solid var(--glass-border)",
+    overflow: "hidden",
+  },
+  thumbWrap: { position: "relative", aspectRatio: "1", cursor: "pointer", background: "rgba(128,128,128,0.08)" },
+  thumb: { width: "100%", height: "100%", objectFit: "cover", display: "block" },
+  meta: { padding: "7px 9px 4px", display: "flex", flexDirection: "column", gap: 3 },
+  metaRow: { display: "flex", alignItems: "center", gap: 5, minWidth: 0 },
+  metaText: {
+    fontSize: "0.76rem", fontWeight: 600, color: "var(--text-1)",
+    overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis",
+  },
+  metaSub: { fontSize: "0.68rem", color: "var(--text-3)" },
+  downloadBtn: {
+    display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+    margin: "6px 9px 9px",
+    padding: "6px 8px",
+    background: "var(--accent-bg)", border: "1px solid var(--glass-border)",
+    color: "var(--text-1)", textDecoration: "none",
+    fontSize: "0.72rem", fontWeight: 700,
+  },
+};
+
 /* ── Folder Card ─────────────────────────────────────────── */
 /* ── Pagination Bar ────────────────────────────────────── */
 function PaginationBar({ page, totalPages, setPage }) {
@@ -505,7 +628,7 @@ function MediaCard({ src, filename, isVideo, selected, onLightbox, onContextMenu
 /* ── Lightbox ────────────────────────────────────────────── */
 const SLIDESHOW_SPEEDS = [10, 15, 20, 25, 30];
 
-function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, setSlideshowInterval, folderTree, onFileRemoved, starredSet, onToggleStar }) {
+function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, setSlideshowInterval, folderTree, onFileRemoved, starredSet, onToggleStar, progressMap, onSaveProgress, onClearProgress }) {
   const file = files[index];
   const [playing, setPlaying] = useState(false);
   const [showSpeedPicker, setShowSpeedPicker] = useState(false);
@@ -522,6 +645,11 @@ function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, se
   const [actionBusy, setActionBusy]         = useState(false);
   const [actionError, setActionError]       = useState("");
 
+  // ── Video resume state ────────────────────────────────
+  const videoRef = useRef(null);
+  const [resumeChoicePending, setResumeChoicePending] = useState(false);
+  const lastSavedAt = useRef(0);
+
   if (!file) return null;
   const isVideo = /\.(mp4|webm|mkv)$/i.test(file);
 
@@ -532,6 +660,52 @@ function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, se
   const slashIdx = relPath.lastIndexOf("/");
   const srcDir   = slashIdx >= 0 ? relPath.slice(0, slashIdx) : "";
   const srcName  = slashIdx >= 0 ? relPath.slice(slashIdx + 1) : relPath;
+
+  const savedProgress = isVideo ? progressMap?.[relPath] : null;
+
+  // Whenever we land on a new video, decide whether to ask "resume or start
+  // over?" before it starts playing.
+  useEffect(() => {
+    if (isVideo && savedProgress?.position > 5) {
+      setResumeChoicePending(true);
+    } else {
+      setResumeChoicePending(false);
+    }
+  }, [relPath, isVideo]);
+
+  // Periodically persist progress while playing (throttled to ~5s), and
+  // always save once more when leaving this video (prev/next/close) so the
+  // last few seconds of watching aren't lost.
+  function reportProgress(force) {
+    const v = videoRef.current;
+    if (!v || !isVideo || resumeChoicePending) return;
+    const now = Date.now();
+    if (!force && now - lastSavedAt.current < 5000) return;
+    lastSavedAt.current = now;
+    onSaveProgress?.(relPath, v.currentTime, v.duration || 0);
+  }
+
+  useEffect(() => {
+    return () => { reportProgress(true); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relPath]);
+
+  function handleResume(fromStart) {
+    setResumeChoicePending(false);
+    const v = videoRef.current;
+    if (v) {
+      v.currentTime = fromStart ? 0 : (savedProgress?.position || 0);
+      v.play().catch(() => {});
+    }
+    if (fromStart) onClearProgress?.(relPath);
+  }
+
+  function formatTime(secs) {
+    if (!secs || !isFinite(secs)) return "0:00";
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  }
 
   async function handleDelete() {
     if (!confirm(`Delete "${srcName}"? This cannot be undone.`)) return;
@@ -837,7 +1011,37 @@ function Lightbox({ files, index, onClose, onPrev, onNext, slideshowInterval, se
         onTouchEnd={handleTouchEnd}
       >
       {isVideo
-          ? <video src={file} controls autoPlay style={lb.media} />
+          ? (
+            <div style={{ position: "relative" }}>
+              <video
+                ref={videoRef}
+                src={file}
+                controls
+                autoPlay={!resumeChoicePending}
+                style={lb.media}
+                onTimeUpdate={() => reportProgress(false)}
+                onPause={() => reportProgress(true)}
+                onEnded={() => onClearProgress?.(relPath)}
+              />
+              {resumeChoicePending && (
+                <div style={lb.resumeOverlay} onClick={(e) => e.stopPropagation()}>
+                  <div style={lb.resumeCard}>
+                    <p style={lb.resumeText}>
+                      You left off at {formatTime(savedProgress?.position)}. Continue watching, or start over?
+                    </p>
+                    <div style={lb.resumeBtnRow}>
+                      <button style={lb.resumeBtnPrimary} onClick={() => handleResume(false)}>
+                        Resume
+                      </button>
+                      <button style={lb.resumeBtnSecondary} onClick={() => handleResume(true)}>
+                        Start Over
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
           : (
             <img
               src={file}
@@ -881,6 +1085,32 @@ const lb = {
     position: "fixed", inset: 0, zIndex: 500,
     background: "rgba(0,0,0,0.94)", display: "flex",
     alignItems: "center", justifyContent: "center",
+  },
+  resumeOverlay: {
+    position: "absolute", inset: 0, zIndex: 5,
+    background: "rgba(0,0,0,0.6)",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    padding: 16,
+  },
+  resumeCard: {
+    background: "var(--bg-mid)", border: "2px solid var(--glass-border)",
+    padding: "18px 20px", maxWidth: 320, width: "100%",
+    display: "flex", flexDirection: "column", gap: 12,
+    boxShadow: "5px 5px 0 rgba(0,0,0,0.6)",
+  },
+  resumeText: { fontSize: "0.88rem", color: "var(--text-1)", lineHeight: 1.4, margin: 0 },
+  resumeBtnRow: { display: "flex", gap: 8, flexWrap: "wrap" },
+  resumeBtnPrimary: {
+    flex: "1 1 100px", padding: "10px 14px",
+    background: "var(--accent)", border: "2px solid var(--glass-border)",
+    color: "var(--bg-deep)", fontWeight: 700, fontSize: "0.84rem",
+    cursor: "pointer", fontFamily: "inherit",
+  },
+  resumeBtnSecondary: {
+    flex: "1 1 100px", padding: "10px 14px",
+    background: "transparent", border: "2px solid var(--glass-border)",
+    color: "var(--text-1)", fontWeight: 600, fontSize: "0.84rem",
+    cursor: "pointer", fontFamily: "inherit",
   },
   topRight: {
     position: "absolute", top: 12, right: 12,
@@ -2048,6 +2278,102 @@ const av = {
   },
 };
 
+/* ── Continue Watching Widget ──────────────────────────── */
+function ContinueWatchingWidget({ videos, loading, onOpen, onRemove }) {
+  function fmtTime(secs) {
+    if (!secs || !isFinite(secs)) return "0:00";
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  }
+
+  if (!loading && videos.length === 0) return null;
+
+  return (
+    <div style={rw.wrap} className="glass-card">
+      <div style={rw.header}>
+        <div style={rw.titleRow}>
+          <svg viewBox="0 0 20 20" fill="none" width="15" height="15" style={{ color: "var(--accent)", flexShrink: 0 }}>
+            <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.3" />
+            <path d="M8 7l5 3-5 3V7z" fill="currentColor" />
+          </svg>
+          <span style={rw.title}>Continue Watching</span>
+        </div>
+      </div>
+
+      {loading && (
+        <div style={{ display: "flex", justifyContent: "center", padding: "24px 0" }}>
+          <div className="loading-spinner" />
+        </div>
+      )}
+
+      {!loading && (
+        <div style={cw.grid}>
+          {videos.map((v, i) => {
+            const pct = v.duration > 0 ? Math.min(100, (v.position / v.duration) * 100) : 0;
+            return (
+              <div key={v.path} style={cw.tile} onClick={() => onOpen(i)}>
+                <video src={v.path} preload="metadata" muted style={cw.thumb} />
+                <div style={cw.playOverlay}>
+                  <svg viewBox="0 0 24 24" fill="none" width="26" height="26">
+                    <circle cx="12" cy="12" r="11" fill="rgba(0,0,0,0.45)" />
+                    <polygon points="10,8 17,12 10,16" fill="#fff" />
+                  </svg>
+                </div>
+                <button
+                  style={cw.removeBtn}
+                  onClick={(e) => { e.stopPropagation(); onRemove(decodeURIComponent(v.path.replace(/^\/media\//, ""))); }}
+                  title="Remove from Continue Watching"
+                >✕</button>
+                <div style={cw.progressTrack}>
+                  <div style={{ ...cw.progressFill, width: `${pct}%` }} />
+                </div>
+                <div style={cw.timeLabel}>{fmtTime(v.position)} / {fmtTime(v.duration)}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const cw = {
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+    gap: 10, padding: 12,
+  },
+  tile: {
+    position: "relative", cursor: "pointer",
+    background: "#000", border: "1px solid var(--glass-border)",
+    aspectRatio: "16 / 10", overflow: "hidden",
+  },
+  thumb: { width: "100%", height: "100%", objectFit: "cover", display: "block", pointerEvents: "none" },
+  playOverlay: {
+    position: "absolute", inset: 0,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    pointerEvents: "none",
+  },
+  removeBtn: {
+    position: "absolute", top: 4, right: 4,
+    width: 20, height: 20,
+    background: "rgba(0,0,0,0.55)", color: "#fff",
+    border: "none", cursor: "pointer", fontSize: "0.62rem",
+    display: "flex", alignItems: "center", justifyContent: "center",
+  },
+  progressTrack: {
+    position: "absolute", bottom: 0, left: 0, right: 0,
+    height: 4, background: "rgba(255,255,255,0.25)",
+  },
+  progressFill: { height: "100%", background: "var(--accent)" },
+  timeLabel: {
+    position: "absolute", bottom: 8, right: 6,
+    background: "rgba(0,0,0,0.6)", color: "#fff",
+    fontSize: "0.64rem", fontWeight: 600, padding: "1px 5px",
+  },
+};
+
 function RandomPhotosWidget({
   photos, count, available, onCountChange, onRefresh, loading, onPhotoClick,
   folderTree, selectedFolders, onFoldersChange,
@@ -2306,6 +2632,11 @@ export default function GalleryDashboard() {
   const [suggestions, setSuggestions] = useState([]);
   const [dismissedSuggestions, setDismissedSuggestions] = useState(new Set()); // folder names, session-only
   const [uploadNotice, setUploadNotice] = useState(null); // duplicate-upload banner text
+  const [continueWatching, setContinueWatching] = useState([]); // [{path, position, duration, updated_at}]
+  const [continueWatchingLoading, setContinueWatchingLoading] = useState(false);
+  const [continueLightbox, setContinueLightbox] = useState(null); // index into continueWatching
+  const [sharedItems, setSharedItems] = useState([]);       // rich listing when browsing the shared folder
+  const [sharedItemsLoading, setSharedItemsLoading] = useState(false);
   const [files, setFiles]             = useState([]);
   const [folders, setFolders]         = useState([]);
   const [folderTree, setFolderTree]   = useState([]);
@@ -2350,6 +2681,16 @@ const { user, isAdmin } = useAuth();
       .then((d) => setFolderTree(d.tree || []));
   }, []);
 
+  /* ── Deep link: admin's "shared folder" shortcut button lands here
+         as /gallery?open=shared ─────────────────────────────── */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("open") === "shared") {
+      navigate("shared");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
+
   /* ── Load starred set once so star icons are correct everywhere,
          not just while viewing the Starred page ────────────── */
   const loadStarred = useCallback(async () => {
@@ -2389,6 +2730,62 @@ const { user, isAdmin } = useAuth();
       }
     } catch (e) { console.error(e); }
   }
+
+  /* ── Continue Watching (video resume) ──────────────────── */
+  const loadContinueWatching = useCallback(async () => {
+    setContinueWatchingLoading(true);
+    try {
+      const res = await fetch("/api/watch-progress");
+      if (res.ok) setContinueWatching((await res.json()).videos || []);
+    } finally {
+      setContinueWatchingLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (currentPath === "" && view === "folder" && !isAdmin) loadContinueWatching();
+  }, [currentPath, view, isAdmin, loadContinueWatching]);
+
+  const progressMap = useMemo(() => {
+    const map = {};
+    for (const v of continueWatching) {
+      map[decodeURIComponent(v.path.replace(/^\/media\//, ""))] = v;
+    }
+    return map;
+  }, [continueWatching]);
+
+  async function saveWatchProgress(relPath, position, duration) {
+    try {
+      await fetch("/api/watch-progress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: relPath, position, duration }),
+      });
+    } catch (e) { console.error(e); }
+  }
+
+  async function clearWatchProgress(relPath) {
+    try {
+      await fetch(`/api/watch-progress?path=${encodeURIComponent(relPath)}`, { method: "DELETE" });
+    } catch (e) { console.error(e); }
+  }
+
+  /* ── Shared folder detail listing ──────────────────────── */
+  async function loadSharedItems(path) {
+    setSharedItemsLoading(true);
+    try {
+      const res = await fetch(`/api/shared-items?path=${encodeURIComponent(path)}`);
+      if (res.ok) setSharedItems((await res.json()).items || []);
+      else setSharedItems([]);
+    } finally {
+      setSharedItemsLoading(false);
+    }
+  }
+
+  const isSharedPath = currentPath === "shared" || currentPath.startsWith("shared/");
+  useEffect(() => {
+    if (view === "folder" && isSharedPath) loadSharedItems(currentPath);
+  }, [currentPath, view]);
 
   /* ── Albums ─────────────────────────────────────────────── */
   const loadAlbums = useCallback(async () => {
@@ -3124,6 +3521,19 @@ function handleTouchEnd() {
           />
         )}
 
+        {/* ── Continue Watching Widget — home screen only, non-admin ── */}
+        {currentPath === "" && !isAdmin && (
+          <ContinueWatchingWidget
+            videos={continueWatching}
+            loading={continueWatchingLoading}
+            onOpen={(i) => setContinueLightbox(i)}
+            onRemove={async (relPath) => {
+              await clearWatchProgress(relPath);
+              loadContinueWatching();
+            }}
+          />
+        )}
+
         {/* ── Pagination (top) ─────────────────────────────── */}
         {totalPages > 1 && (
           <div style={gs.paginationBar}>
@@ -3133,6 +3543,20 @@ function handleTouchEnd() {
         )}
 
         {/* ── Media grid ───────────────────────────────── */}
+        {isSharedPath ? (
+          <SharedFolderGrid
+            folders={folders}
+            items={sharedItems}
+            loading={sharedItemsLoading || loading}
+            starredSet={starredSet}
+            onToggleStar={isAdmin ? null : toggleStar}
+            onOpenFolder={(folder) => navigate(currentPath ? `${currentPath}/${folder}` : folder)}
+            onOpenLightbox={(url) => {
+              const idx = lightboxUrls.indexOf(url);
+              if (idx >= 0) setLightboxIndex(idx);
+            }}
+          />
+        ) : (
         <main style={gs.grid}>
 
           {loading && (
@@ -3195,9 +3619,10 @@ function handleTouchEnd() {
             );
           })}
         </main>
+        )}
 
         {/* Pagination (bottom) */}
-        {totalPages > 1 && (
+        {!isSharedPath && totalPages > 1 && (
           <div style={gs.paginationBar} className="paginationBar-bottom">
             <span style={gs.fileCount}>{files.length} file{files.length !== 1 ? "s" : ""}</span>
             <PaginationBar page={page} totalPages={totalPages} setPage={setPage} />
@@ -3299,6 +3724,9 @@ function handleTouchEnd() {
           folderTree={folderTree}
           starredSet={starredSet}
           onToggleStar={isAdmin ? null : toggleStar}
+          progressMap={progressMap}
+          onSaveProgress={saveWatchProgress}
+          onClearProgress={clearWatchProgress}
           onFileRemoved={() => {
             setLightboxIndex(null);
             loadMedia(currentPath);
@@ -3320,6 +3748,9 @@ function handleTouchEnd() {
           folderTree={folderTree}
           starredSet={starredSet}
           onToggleStar={isAdmin ? null : toggleStar}
+          progressMap={progressMap}
+          onSaveProgress={saveWatchProgress}
+          onClearProgress={clearWatchProgress}
           onFileRemoved={() => {
             setRandomLightbox(null);
             loadRandomPhotos(randomCount, randomFolders);
@@ -3340,6 +3771,9 @@ function handleTouchEnd() {
           folderTree={folderTree}
           starredSet={starredSet}
           onToggleStar={toggleStar}
+          progressMap={progressMap}
+          onSaveProgress={saveWatchProgress}
+          onClearProgress={clearWatchProgress}
           onFileRemoved={() => {
             setStarredLightbox(null);
             loadStarred();
@@ -3360,9 +3794,35 @@ function handleTouchEnd() {
           folderTree={folderTree}
           starredSet={starredSet}
           onToggleStar={isAdmin ? null : toggleStar}
+          progressMap={progressMap}
+          onSaveProgress={saveWatchProgress}
+          onClearProgress={clearWatchProgress}
           onFileRemoved={() => {
             setAlbumLightbox(null);
             loadAlbumDetail(currentAlbumId);
+          }}
+        />
+      )}
+
+      {/* ── Continue Watching lightbox ─────────────────── */}
+      {continueLightbox !== null && (
+        <Lightbox
+          files={continueWatching.map((v) => v.path)}
+          index={continueLightbox}
+          onClose={() => setContinueLightbox(null)}
+          onPrev={() => setContinueLightbox((i) => (i - 1 + continueWatching.length) % continueWatching.length)}
+          onNext={() => setContinueLightbox((i) => (i + 1) % continueWatching.length)}
+          slideshowInterval={slideshowInterval}
+          setSlideshowInterval={setSlideshowInterval}
+          folderTree={folderTree}
+          starredSet={starredSet}
+          onToggleStar={isAdmin ? null : toggleStar}
+          progressMap={progressMap}
+          onSaveProgress={saveWatchProgress}
+          onClearProgress={clearWatchProgress}
+          onFileRemoved={() => {
+            setContinueLightbox(null);
+            loadContinueWatching();
           }}
         />
       )}

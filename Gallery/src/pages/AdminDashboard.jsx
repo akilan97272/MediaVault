@@ -601,6 +601,12 @@ export default function AdminDashboard() {
         <div className="glass-card adm-header" style={s.header}>
           <h1 style={{ ...s.title, textAlign: "left", flex: "unset" }}>Admin Dashboard</h1>
           <div style={{ ...s.headerRight, flex: 1, justifyContent: "flex-end" }}>
+            <a style={{ ...s.navPillBtn, textDecoration: "none" }} href="/gallery?open=shared" title="Browse the shared folder">
+              <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                <path d="M2 6a2 2 0 012-2h3.586a1 1 0 01.707.293L9.414 5.5H16a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" stroke="currentColor" strokeWidth="1.4" />
+              </svg>
+              Shared Folder
+            </a>
             <button style={s.navPillBtn} onClick={() => setShowUserManager(true)}>
               <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
                 <circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.4" />
@@ -640,6 +646,12 @@ export default function AdminDashboard() {
 
         {/* ── Mobile actions (adm-header is hidden below 768px) ── */}
         <div className="glass-card adm-mobile-actions" style={s.mobileActions}>
+          <a href="/gallery?open=shared" style={s.mobileActionBtn}>
+            <svg viewBox="0 0 20 20" fill="none" width="16" height="16">
+              <path d="M2 6a2 2 0 012-2h3.586a1 1 0 01.707.293L9.414 5.5H16a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" stroke="currentColor" strokeWidth="1.4" />
+            </svg>
+            Shared
+          </a>
           <button style={s.mobileActionBtn} onClick={() => setShowUserManager(true)}>
             <svg viewBox="0 0 20 20" fill="none" width="16" height="16">
               <circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.4" />
