@@ -412,6 +412,22 @@ def _remove_path_everywhere(rel_path: str) -> None:
     if changed:
         save_favorites(favs_all)
 
+    wp_all  = load_watch_progress()
+    changed = False
+    for user, entries in wp_all.items():
+        before = len(entries)
+        wp_all[user] = {p: v for p, v in entries.items() if not _gone(p)}
+        if len(wp_all[user]) != before:
+            changed = True
+    if changed:
+        save_watch_progress(wp_all)
+
+    meta    = load_shared_meta()
+    before  = len(meta)
+    new_meta = {p: v for p, v in meta.items() if not _gone(p)}
+    if len(new_meta) != before:
+        save_shared_meta(new_meta)
+
 
 def _rename_path_everywhere(old_rel: str, new_rel: str) -> None:
     """Keeps album/favorite references pointing at the right place after a
@@ -461,6 +477,102 @@ def _rename_path_everywhere(old_rel: str, new_rel: str) -> None:
     if changed:
         save_favorites(favs_all)
 
+    wp_all  = load_watch_progress()
+    changed = False
+    for user, entries in wp_all.items():
+        new_entries = {}
+        for p, v in entries.items():
+            r = _renamed(p)
+            new_entries[r if r is not None else p] = v
+            if r is not None:
+                changed = True
+        wp_all[user] = new_entries
+    if changed:
+        save_watch_progress(wp_all)
+
+    meta    = load_shared_meta()
+    changed = False
+    new_meta = {}
+    for p, v in meta.items():
+        r = _renamed(p)
+        new_meta[r if r is not None else p] = v
+        if r is not None:
+            changed = True
+    if changed:
+        save_shared_meta(new_meta)
+
+
+# ── Watch Progress (resume playback) ────────────────────────────────────────────
+# { "<username>": { "<rel_path>": {"position": secs, "duration": secs, "updated_at": iso} } }
+# Capped to the 5 most recently-updated entries per user.
+
+WATCH_PROGRESS_FILE = os.path.join(BASE_DIR, "watch_progress.json")
+_watch_progress_cache: dict | None = None
+_watch_progress_lock  = threading.Lock()
+
+WATCH_PROGRESS_MAX_ENTRIES = 5
+# Ignore updates this close to the start (not really "in progress" yet) or
+# this close to the end (effectively finished) — nothing worth resuming.
+WATCH_PROGRESS_MIN_POSITION = 5
+WATCH_PROGRESS_COMPLETE_RATIO = 0.95
+
+
+def load_watch_progress() -> dict:
+    global _watch_progress_cache
+    if _watch_progress_cache is not None:
+        return _watch_progress_cache
+    with _watch_progress_lock:
+        if _watch_progress_cache is None:
+            _watch_progress_cache = json.load(open(WATCH_PROGRESS_FILE)) if os.path.exists(WATCH_PROGRESS_FILE) else {}
+    return _watch_progress_cache
+
+
+def save_watch_progress(w: dict) -> None:
+    global _watch_progress_cache
+    with _watch_progress_lock:
+        tmp = WATCH_PROGRESS_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(w, f, separators=(',', ':'))
+        os.replace(tmp, WATCH_PROGRESS_FILE)
+        _watch_progress_cache = w
+
+
+# ── Shared-folder upload metadata ───────────────────────────────────────────────
+# { "<rel_path>": {"uploader": username, "uploaded_at": iso} } — only ever
+# populated for files uploaded under "shared/", used to show who shared a
+# file and when in the shared-folder detail cards.
+
+SHARED_META_FILE = os.path.join(BASE_DIR, "shared_meta.json")
+_shared_meta_cache: dict | None = None
+_shared_meta_lock  = threading.Lock()
+
+
+def load_shared_meta() -> dict:
+    global _shared_meta_cache
+    if _shared_meta_cache is not None:
+        return _shared_meta_cache
+    with _shared_meta_lock:
+        if _shared_meta_cache is None:
+            _shared_meta_cache = json.load(open(SHARED_META_FILE)) if os.path.exists(SHARED_META_FILE) else {}
+    return _shared_meta_cache
+
+
+def save_shared_meta(m: dict) -> None:
+    global _shared_meta_cache
+    with _shared_meta_lock:
+        tmp = SHARED_META_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(m, f, separators=(',', ':'))
+        os.replace(tmp, SHARED_META_FILE)
+        _shared_meta_cache = m
+
+
+def _record_shared_meta(rel_path: str, uploader: str) -> None:
+    if not (rel_path == "shared" or rel_path.startswith("shared/")):
+        return
+    meta = load_shared_meta()
+    meta[rel_path] = {"uploader": uploader, "uploaded_at": datetime.now().isoformat()}
+    save_shared_meta(meta)
 
 import json, threading
 
@@ -1126,6 +1238,7 @@ async def upload_media(request: Request,
     # ── Update index ──────────────────────────────────────────
     rel = os.path.relpath(file_path, MEDIA_DIR).replace(os.sep, "/")
     _add_to_index(rel)
+    _record_shared_meta(rel, user)
 
     # ── Duplicate detection (informational only) ───────────────
     dup_paths = _record_file_hash(rel, file_hash.hexdigest())
@@ -1557,8 +1670,130 @@ def page(page_key: str, status: int = 200, user: str | None = None) -> HTMLRespo
     return HTMLResponse(content=html, status_code=status, headers=dict(_NO_CACHE))
 
 
-# add this new route alongside the other page routes
-@app.get("/api/me")
+# ── Watch Progress API (resume playback) ────────────────────────────────────────
+
+@app.get("/api/watch-progress")
+def list_watch_progress(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    entries = load_watch_progress().get(user, {})
+    out = []
+    for p, v in entries.items():
+        if not can_access_path(user, p) or not os.path.exists(secure_path(p)):
+            continue
+        out.append({
+            "path":       f"/media/{p}",
+            "position":   v.get("position", 0),
+            "duration":   v.get("duration", 0),
+            "updated_at": v.get("updated_at"),
+        })
+    out.sort(key=lambda e: e["updated_at"] or "", reverse=True)
+    return {"videos": out[:WATCH_PROGRESS_MAX_ENTRIES]}
+
+
+class WatchProgressRequest(BaseModel):
+    path:     str = ""
+    position: float = 0
+    duration: float = 0
+
+@app.post("/api/watch-progress")
+def update_watch_progress(body: WatchProgressRequest, request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    p = body.path.strip("/")
+    if not p or not can_access_path(user, p):
+        return JSONResponse(status_code=403, content={"error": "Access denied"})
+
+    wp_all  = load_watch_progress()
+    entries = wp_all.get(user, {})
+
+    # Barely started, or effectively finished — nothing worth resuming, so
+    # drop any existing entry instead of tracking it.
+    near_start    = body.position < WATCH_PROGRESS_MIN_POSITION
+    near_complete = body.duration > 0 and (body.position / body.duration) >= WATCH_PROGRESS_COMPLETE_RATIO
+    if near_start or near_complete:
+        if p in entries:
+            del entries[p]
+            wp_all[user] = entries
+            save_watch_progress(wp_all)
+        return {"status": "ok", "tracked": False}
+
+    entries[p] = {
+        "position":   body.position,
+        "duration":   body.duration,
+        "updated_at": datetime.now().isoformat(),
+    }
+    # Cap to the N most recently-updated entries
+    if len(entries) > WATCH_PROGRESS_MAX_ENTRIES:
+        ordered = sorted(entries.items(), key=lambda kv: kv[1].get("updated_at", ""), reverse=True)
+        entries = dict(ordered[:WATCH_PROGRESS_MAX_ENTRIES])
+
+    wp_all[user] = entries
+    save_watch_progress(wp_all)
+    return {"status": "ok", "tracked": True}
+
+
+@app.delete("/api/watch-progress")
+def clear_watch_progress(request: Request, path: str = ""):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    p = path.strip("/")
+    wp_all  = load_watch_progress()
+    entries = wp_all.get(user, {})
+    if p in entries:
+        del entries[p]
+        wp_all[user] = entries
+        save_watch_progress(wp_all)
+    return {"status": "ok"}
+
+
+# ── Shared Folder detail listing ─────────────────────────────────────────────────
+
+@app.get("/api/shared-items")
+def shared_items(request: Request, path: str = "shared"):
+    """Rich listing for the shared folder (or a subfolder within it) —
+    includes who uploaded each file, when, and its size, for the shared-
+    folder detail cards."""
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    path = path.strip("/") or "shared"
+    if path != "shared" and not path.startswith("shared/"):
+        return JSONResponse(status_code=400, content={"error": "Path must be within the shared folder"})
+    if not can_access_path(user, path):
+        return JSONResponse(status_code=403, content={"error": "Access denied"})
+
+    target = secure_path(path)
+    if not os.path.isdir(target):
+        return JSONResponse(status_code=404, content={"error": "Folder not found"})
+
+    meta  = load_shared_meta()
+    items = []
+    try:
+        with os.scandir(target) as it:
+            for e in it:
+                if e.is_file(follow_symlinks=False) and e.name.lower().endswith(_ALLOWED_EXT):
+                    rel = f"{path}/{e.name}"
+                    st  = e.stat()
+                    m   = meta.get(rel, {})
+                    items.append({
+                        "filename":    e.name,
+                        "url":         f"/media/{rel}",
+                        "uploader":    m.get("uploader") or "Unknown",
+                        "uploaded_at": m.get("uploaded_at") or datetime.fromtimestamp(st.st_mtime).isoformat(),
+                        "size":        st.st_size,
+                        "is_video":    e.name.lower().endswith((".mp4", ".webm", ".mkv")),
+                    })
+    except OSError:
+        pass
+    items.sort(key=lambda x: x["uploaded_at"], reverse=True)
+    return {"path": path, "items": items}
+
+
+
 def me(request: Request):
     user = get_current_user(request)
     if not user:
