@@ -211,22 +211,26 @@ function FolderMoveModal({ items, folderTree, onClose, onMoved }) {
             {children.length === 0 && (
               <div style={fm.emptyNote}>No subfolders here</div>
             )}
-            {children.map((node) => (
+            {children.map((node) => {
+              const isShared = !browsePath && node.name === "shared";
+              return (
               <button
                 key={node.name}
-                style={fm.folderTile}
+                style={{ ...fm.folderTile, ...(isShared ? fm.folderTileShared : null) }}
                 onClick={() => setBrowsePath(browsePath ? `${browsePath}/${node.name}` : node.name)}
                 title={`Open ${node.name}`}
               >
                 <svg viewBox="0 0 48 40" fill="none" width="32" height="27">
                   <path
                     d="M2 8a4 4 0 014-4h12l4 4h20a4 4 0 014 4v22a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"
-                    fill="var(--folder-fill)" stroke="var(--folder-stroke)" strokeWidth="1.4"
+                    fill={isShared ? "var(--folder-shared-fill)" : "var(--folder-fill)"}
+                    stroke={isShared ? "var(--folder-shared-stroke)" : "var(--folder-stroke)"} strokeWidth="1.4"
                   />
                 </svg>
                 <span style={fm.folderTileName}>{node.name}</span>
               </button>
-            ))}
+              );
+            })}
           </div>
 
           <button className="glass-btn-primary" onClick={moveHere} disabled={loading || alreadyThere}>
@@ -293,6 +297,9 @@ const fm = {
     padding: "10px 6px",
     background: "var(--glass-bg)", border: "1px solid var(--glass-border)",
     cursor: "pointer", fontFamily: "inherit",
+  },
+  folderTileShared: {
+    border: "1.5px solid var(--folder-shared-stroke)",
   },
   folderTileName: {
     fontSize: "0.74rem", fontWeight: 600, color: "var(--text-2)",
@@ -508,7 +515,7 @@ function PaginationBar({ page, totalPages, setPage }) {
   );
 }
 
-function FolderCard({ name, onClick, onContextMenu, selected }) {
+function FolderCard({ name, onClick, onContextMenu, selected, shared }) {
   const longPressTimer = useRef(null);
 
   function startLongPress(e) {
@@ -527,6 +534,7 @@ function FolderCard({ name, onClick, onContextMenu, selected }) {
       style={{
         ...gs.folderCard,
         ...(selected ? gs.folderCardSelected : {}),
+        ...(shared ? gs.folderCardShared : {}),
       }}
       onClick={onClick}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(e.clientX, e.clientY); }}
@@ -538,12 +546,20 @@ function FolderCard({ name, onClick, onContextMenu, selected }) {
         <svg viewBox="0 0 48 40" fill="none" width="48" height="40">
           <path
             d="M2 8a4 4 0 014-4h12l4 4h20a4 4 0 014 4v22a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"
-            fill={selected ? "var(--accent-bg)" : "var(--folder-fill)"}
-            stroke={selected ? "var(--accent)" : "var(--folder-stroke)"}
+            fill={selected ? "var(--accent-bg)" : shared ? "var(--folder-shared-fill)" : "var(--folder-fill)"}
+            stroke={selected ? "var(--accent)" : shared ? "var(--folder-shared-stroke)" : "var(--folder-stroke)"}
             strokeWidth="1.4"
           />
+          {shared && (
+            // Small people icon on the folder, reinforcing "shared" beyond just color
+            <g transform="translate(31, 22)">
+              <circle cx="0" cy="0" r="3.4" fill="var(--folder-shared-stroke)" />
+              <path d="M-4 6c0-2.2 1.8-4 4-4s4 1.8 4 4" stroke="var(--folder-shared-stroke)" strokeWidth="1.3" fill="none" strokeLinecap="round" />
+            </g>
+          )}
         </svg>
         <span style={gs.folderName}>{name}</span>
+        {shared && <span style={gs.sharedBadge}>Shared</span>}
       </div>
       {selected && (
         <div style={gs.folderCheckmark}>
@@ -1663,8 +1679,9 @@ function FolderSourceModal({ folderTree, selectedFolders, onChange, onClose }) {
             {children.map((node) => {
               const path    = browsePath ? `${browsePath}/${node.name}` : node.name;
               const checked = !isAll && localSelected.includes(path);
+              const isShared = !browsePath && node.name === "shared";
               return (
-                <div key={node.name} style={fsm.tile}>
+                <div key={node.name} style={{ ...fsm.tile, ...(isShared ? fm.folderTileShared : null) }}>
                   <button
                     style={{ ...fsm.checkbox, ...(checked ? fsm.checkboxActive : null), ...fsm.tileCheckbox }}
                     onClick={() => toggleFolder(path)}
@@ -1680,7 +1697,8 @@ function FolderSourceModal({ folderTree, selectedFolders, onChange, onClose }) {
                     <svg viewBox="0 0 48 40" fill="none" width="30" height="25">
                       <path
                         d="M2 8a4 4 0 014-4h12l4 4h20a4 4 0 014 4v22a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"
-                        fill="var(--folder-fill)" stroke="var(--folder-stroke)" strokeWidth="1.4"
+                        fill={isShared ? "var(--folder-shared-fill)" : "var(--folder-fill)"}
+                        stroke={isShared ? "var(--folder-shared-stroke)" : "var(--folder-stroke)"} strokeWidth="1.4"
                       />
                     </svg>
                     <span style={fm.folderTileName}>{node.name}</span>
@@ -3582,6 +3600,7 @@ function handleTouchEnd() {
               <FolderCard
                 name={folder}
                 selected={selectedFolders.has(folder)}
+                shared={currentPath === "" && folder === "shared"}
                 onClick={() => {
                   // If in selection mode, toggle instead of navigate
                   if (totalSelected > 0) { toggleSelectFolder(folder); return; }
@@ -4084,6 +4103,9 @@ const gs = {
     background: "var(--accent-bg)",
     boxShadow: "0 0 0 2px var(--accent-glow)",
   },
+  folderCardShared: {
+    border: "1.5px solid var(--folder-shared-stroke)",
+  },
   folderCardInner: {
     display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
   },
@@ -4091,6 +4113,13 @@ const gs = {
     fontSize: "0.78rem", fontWeight: 500, color: "var(--text-2)",
     textAlign: "center", overflow: "hidden", whiteSpace: "nowrap",
     textOverflow: "ellipsis", width: "100%",
+  },
+  sharedBadge: {
+    fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase",
+    letterSpacing: "0.04em", color: "var(--folder-shared-stroke)",
+    background: "var(--folder-shared-fill)",
+    border: "1px solid var(--folder-shared-stroke)",
+    padding: "1px 6px", marginTop: 2,
   },
   folderCheckmark: {
     position: "absolute", top: 6, left: 6,

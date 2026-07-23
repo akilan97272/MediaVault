@@ -8,12 +8,13 @@ import threading
 import aiofiles
 import hashlib
 import uuid
+import mimetypes
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Form, File, UploadFile, HTTPException
 from pydantic import BaseModel
 from fastapi.params import Query
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from itsdangerous import Signer
 from passlib.context import CryptContext
@@ -697,17 +698,49 @@ class CachedStaticFiles(StaticFiles):
         resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return resp
 
-app.mount("/media",  StaticFiles(directory=MEDIA_DIR), name="media")
+# NOTE: /media is intentionally NOT a StaticFiles mount — see serve_media()
+# below for why (auth + HTTP Range support, neither of which StaticFiles
+# gives us in the Starlette version this pins).
 # app.mount("/static", StaticFiles(directory="static"),  name="static")
 if os.path.isdir(os.path.join(DIST_DIR, "assets")):
     app.mount("/assets", CachedStaticFiles(directory=os.path.join(DIST_DIR, "assets")), name="assets")
 if os.path.isdir(os.path.join(DIST_DIR, "backgrounds")):
     app.mount("/backgrounds", CachedStaticFiles(directory=os.path.join(DIST_DIR, "backgrounds")), name="backgrounds")
 
+
+class SelectiveGZipMiddleware:
+    """Same as Starlette's GZipMiddleware, but skips /media entirely.
+
+    Two reasons that matters a lot here:
+      1. Video/image files are already compressed formats — gzipping them
+         again wastes CPU for essentially no size reduction.
+      2. Critically, gzip and HTTP Range requests don't mix: a byte range
+         is a range into the ORIGINAL file, but if the response body is
+         being gzip-encoded, "bytes 1000-2000" no longer corresponds to
+         anything decodable on its own. <video> playback and seeking rely
+         entirely on Range requests, so compressing /media responses
+         silently broke video streaming — this is what was actually
+         causing videos to fail (or lose audio) when played through the
+         site while working fine opened directly from disk.
+
+    Everything else (the JSON API responses) still gets compressed as
+    before.
+    """
+    def __init__(self, app, minimum_size: int = 1024):
+        self.app      = app
+        self.gzip_app = GZipMiddleware(app, minimum_size=minimum_size)
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope.get("path", "").startswith("/media/"):
+            await self.app(scope, receive, send)
+        else:
+            await self.gzip_app(scope, receive, send)
+
+
 # Compresses JSON/HTML/text responses (admin stats, folder tree, activity
 # log, etc.) — cheap win for perceived speed, especially over a real network
-# rather than localhost.
-app.add_middleware(GZipMiddleware, minimum_size=1024)
+# rather than localhost. /media is excluded — see SelectiveGZipMiddleware.
+app.add_middleware(SelectiveGZipMiddleware, minimum_size=1024)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
@@ -717,6 +750,101 @@ app.add_middleware(
 )
 
 # ── Exception handler ─────────────────────────────────────────────────────────
+
+RANGE_CHUNK_SIZE = 1024 * 1024  # 1 MB read chunks — keeps memory flat no matter the file size
+
+
+async def _stream_file_range(path: str, start: int, end: int):
+    """Yields bytes from `path` between start and end (inclusive) in
+    RANGE_CHUNK_SIZE pieces, never holding more than one chunk in memory —
+    safe for multi-gigabyte video files, and lets playback begin as soon as
+    the first chunk arrives instead of waiting on the whole file."""
+    async with aiofiles.open(path, "rb") as f:
+        await f.seek(start)
+        remaining = end - start + 1
+        while remaining > 0:
+            chunk = await f.read(min(RANGE_CHUNK_SIZE, remaining))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+            yield chunk
+
+
+@app.get("/media/{file_path:path}")
+async def serve_media(file_path: str, request: Request):
+    """Replaces the old bare StaticFiles mount for /media. That mount gave
+    us neither of the two things that actually matter for video:
+
+      1. Auth / per-user access control — previously ANY file under
+         MEDIA_DIR was servable to anyone who knew (or guessed) the URL,
+         logged in or not.
+      2. Real HTTP Range support. Browsers rely entirely on Range requests
+         to seek within a video and to start playing before the whole file
+         has downloaded. Without it, a multi-gigabyte video can fail to
+         play at all, hang, or (depending on how far the browser gets
+         through the file) play video with no audio — this was the actual
+         root cause of the "plays fine opened directly from disk, broken
+         on the website" symptom.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if not can_access_path(user, file_path):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    abs_path = secure_path(file_path)
+    if not os.path.isfile(abs_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    file_size    = os.path.getsize(abs_path)
+    content_type = mimetypes.guess_type(abs_path)[0] or "application/octet-stream"
+    range_header = request.headers.get("range")
+
+    base_headers = {
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "private, max-age=86400",
+    }
+
+    if range_header:
+        start, end = 0, file_size - 1
+        try:
+            _, _, rng = range_header.partition("=")
+            start_s, _, end_s = rng.partition("-")
+            if start_s:
+                start = int(start_s)
+            if end_s:
+                end = min(int(end_s), file_size - 1)
+        except ValueError:
+            pass
+
+        if start >= file_size or start > end:
+            return Response(
+                status_code=416,
+                headers={"Content-Range": f"bytes */{file_size}"},
+            )
+
+        headers = {
+            **base_headers,
+            "Content-Range":  f"bytes {start}-{end}/{file_size}",
+            "Content-Length": str(end - start + 1),
+        }
+        return StreamingResponse(
+            _stream_file_range(abs_path, start, end),
+            status_code=206,
+            headers=headers,
+            media_type=content_type,
+        )
+
+    # No Range header — serve the whole file, still streamed in chunks
+    # rather than read into memory all at once.
+    headers = {**base_headers, "Content-Length": str(file_size)}
+    return StreamingResponse(
+        _stream_file_range(abs_path, 0, file_size - 1),
+        status_code=200,
+        headers=headers,
+        media_type=content_type,
+    )
+
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exc_handler(request: Request, exc: StarletteHTTPException):
@@ -1118,6 +1246,12 @@ def list_media(request: Request, path: str = ""):
             if not day_restricted:
                 files.append(e.name)
 
+    # Folders: alphabetical (ascending), case-insensitive, but "shared"
+    # always leads since it's a special, always-present folder rather than
+    # user content. Files: left as most-recently-modified first (already
+    # applied above) — that ordering is intentional for browsing photos.
+    folders.sort(key=lambda name: (name.lower() != "shared", name.lower()))
+
     return {
         "files":        files,
         "folders":      folders,
@@ -1142,7 +1276,7 @@ def get_folder_tree(request: Request):
             with os.scandir(directory) as it:
                 dirs = sorted(
                     (e for e in it if e.is_dir(follow_symlinks=False)),
-                    key=lambda e: e.name,
+                    key=lambda e: (depth == 0 and e.name.lower() != "shared", e.name.lower()),
                 )
             for e in dirs:
                 if depth == 0 and allowed is not None and e.name not in allowed:
